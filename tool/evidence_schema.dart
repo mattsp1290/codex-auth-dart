@@ -102,6 +102,8 @@ final class EvidenceSchema {
       if (predicates.values.any((value) => value is! bool && value is! int)) {
         _fail();
       }
+      final allowed = _passPredicates[id]!;
+      if (predicates.keys.any((key) => !allowed.contains(key))) _fail();
       final substitute = row['hermeticTest'];
       if (state == 'not-safely-inducible') {
         if (id != 'cancel-login' && id != 'expiry-decline') _fail();
@@ -114,59 +116,123 @@ final class EvidenceSchema {
     if (seen.length != rowIds.length) _fail();
   }
 
+  static const _passPredicates = <String, Set<String>>{
+    'apk-device-provenance': {
+      'physicalDevice',
+      'digestEqual',
+      'embeddedCommitMatch',
+      'embeddedFlavorMatch',
+      'variantMatch',
+      'dartTargetMatch',
+      'applicationIdMatch',
+      'compiledFingerprintMatch',
+    },
+    'approved-login': {
+      'approvalCompleted',
+      'commitAcknowledged',
+      'promptCleared',
+      'freshClient',
+    },
+    'cancel-login': {
+      'cancellationObserved',
+      'credentialWriteCount',
+      'promptCleared',
+      'zeroProtectedIo',
+    },
+    'expiry-decline': {
+      'declinedOrExpired',
+      'credentialWriteCount',
+      'promptCleared',
+      'zeroProtectedIo',
+    },
+    'rehydrate-after-resume': {
+      'graphChanged',
+      'recoveryResolved',
+      'noLoginRepeated',
+      'resolvedBeforeProtectedIo',
+      'freshClient',
+    },
+    'rehydrate-after-process-death': {
+      'processChanged',
+      'recoveryResolved',
+      'noLoginRepeated',
+      'resolvedBeforeProtectedIo',
+      'freshClient',
+    },
+    'two-client-rotation': {
+      'refreshCount',
+      'rotationObserved',
+      'bothComplete',
+      'noOverlapViolation',
+      'freshClient',
+    },
+    'interrupt-after-refresh-risk': {
+      'refreshRiskAcknowledged',
+      'processChanged',
+      'oldStateCleared',
+      'zeroProtectedIoBeforeResolution',
+      'reauthenticated',
+      'freshClient',
+    },
+    'interrupt-before-replacement-commit': {
+      'refreshResponseCount',
+      'refreshRiskAcknowledged',
+      'replacementNotAcknowledged',
+      'processChanged',
+      'oldStateCleared',
+      'zeroProtectedIoBeforeResolution',
+      'reauthenticated',
+      'freshClient',
+    },
+    'interrupt-after-replacement-commit': {
+      'refreshResponseCount',
+      'replacementAcknowledged',
+      'operationSuccessNotReported',
+      'processChanged',
+      'replacementGenerationVerified',
+      'resolvedBeforeProtectedIo',
+      'freshClient',
+    },
+    'invalid-grant': {
+      'refreshCount',
+      'cleanupAcknowledged',
+      'zeroProtectedIoBeforeReauthentication',
+      'reauthenticated',
+      'freshClient',
+    },
+    'expired-without-refresh': {
+      'seedAcknowledged',
+      'zeroProtectedIo',
+      'cleanupAcknowledged',
+      'reauthenticated',
+      'freshClient',
+    },
+    'malformed-store': {
+      'seedAcknowledged',
+      'zeroProtectedIo',
+      'cleanupAcknowledged',
+      'reauthenticated',
+      'freshClient',
+    },
+    'catalog-and-unavailable': {
+      'catalogCount',
+      'allAdmitted',
+      'unavailableRejected',
+      'zeroResponses',
+    },
+    'local-logout': {'clearAcknowledged', 'signedOut', 'noRemoteRevocation'},
+  };
+
   static void _passRow(String id, Map<String, Object?> p) {
-    const required = <String, Set<String>>{
-      'apk-device-provenance': {
-        'physicalDevice',
-        'digestEqual',
-        'provenanceMatch',
-      },
-      'approved-login': {'commitAcknowledged', 'promptCleared', 'freshClient'},
-      'rehydrate-after-resume': {
-        'graphChanged',
-        'recoveryResolved',
-        'freshClient',
-      },
-      'rehydrate-after-process-death': {
-        'processChanged',
-        'recoveryResolved',
-        'freshClient',
-      },
-      'two-client-rotation': {
-        'refreshCount',
-        'rotationObserved',
-        'bothComplete',
-        'freshClient',
-      },
-      'invalid-grant': {'refreshCount', 'cleanupAcknowledged', 'freshClient'},
-      'expired-without-refresh': {
-        'seedAcknowledged',
-        'zeroProtectedIo',
-        'cleanupAcknowledged',
-        'freshClient',
-      },
-      'malformed-store': {
-        'seedAcknowledged',
-        'zeroProtectedIo',
-        'cleanupAcknowledged',
-        'freshClient',
-      },
-      'catalog-and-unavailable': {
-        'catalogCount',
-        'allAdmitted',
-        'unavailableRejected',
-        'zeroResponses',
-      },
-      'local-logout': {'clearAcknowledged', 'signedOut'},
-    };
-    final needed = required[id];
-    if (needed == null) return;
+    final needed = _passPredicates[id]!;
     for (final key in needed) {
       final value = p[key];
       if (key.endsWith('Count')) {
         if (value is! int ||
             value < 0 ||
             (key == 'refreshCount' && value != 1) ||
+            (key == 'refreshResponseCount' && value != 1) ||
+            (key == 'credentialWriteCount' && value != 0) ||
             (key == 'catalogCount' && value != 1)) {
           _fail();
         }

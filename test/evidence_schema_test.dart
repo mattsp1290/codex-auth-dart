@@ -102,4 +102,30 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('rejects invented and incomplete pass predicates', () {
+    final invented = _record();
+    (invented['rows']! as List<Object?>).first = <String, Object?>{
+      'id': 'apk-device-provenance',
+      'state': 'fail',
+      'predicates': <String, Object?>{'provenanceMatch': true},
+      'hermeticTest': null,
+    };
+    expect(
+      () => EvidenceSchema.validateRenderable(invented),
+      throwsFormatException,
+    );
+
+    final incomplete = _record();
+    (incomplete['rows']! as List<Object?>).first = <String, Object?>{
+      'id': 'apk-device-provenance',
+      'state': 'pass',
+      'predicates': <String, Object?>{'physicalDevice': true},
+      'hermeticTest': null,
+    };
+    expect(
+      () => EvidenceSchema.validateRenderable(incomplete),
+      throwsFormatException,
+    );
+  });
 }
