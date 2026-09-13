@@ -264,10 +264,30 @@ final class _Adb {
       'exec-out',
       'run-as',
       _package,
-      'sh',
-      '-c',
-      'rm -f files/evidence-command.json files/evidence-result.json files/evidence-result.json.tmp',
+      'rm',
+      '-f',
+      'files/evidence-command.json',
+      'files/evidence-result.json',
+      'files/evidence-result.json.tmp',
     ]);
+    final files = await _run(<String>[
+      'exec-out',
+      'run-as',
+      _package,
+      'ls',
+      'files',
+    ]);
+    if (files
+        .split(RegExp(r'\s+'))
+        .any(
+          <String>{
+            'evidence-command.json',
+            'evidence-result.json',
+            'evidence-result.json.tmp',
+          }.contains,
+        )) {
+      throw StateError('transient evidence state cannot be cleared');
+    }
   }
 
   Future<bool> commandWasConsumed() async {
