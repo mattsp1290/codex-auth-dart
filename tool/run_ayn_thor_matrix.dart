@@ -274,34 +274,42 @@ final class _Adb {
   }
 
   Future<void> clearTransientState() async {
-    await _run(<String>[
-      'exec-out',
-      'run-as',
-      _package,
-      'rm',
-      '-f',
-      'files/evidence-command.json',
-      'files/evidence-result.json',
-      'files/evidence-result.json.tmp',
-    ]);
-    final files = await _run(<String>[
-      'exec-out',
-      'run-as',
-      _package,
-      'ls',
-      'files',
-    ]);
-    if (files
-        .split(RegExp(r'\s+'))
-        .any(
-          <String>{
-            'evidence-command.json',
-            'evidence-result.json',
-            'evidence-result.json.tmp',
-          }.contains,
-        )) {
-      throw StateError('transient evidence state cannot be cleared');
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        await _run(<String>[
+          'exec-out',
+          'run-as',
+          _package,
+          'rm',
+          '-f',
+          'files/evidence-command.json',
+          'files/evidence-result.json',
+          'files/evidence-result.json.tmp',
+        ]);
+        final files = await _run(<String>[
+          'exec-out',
+          'run-as',
+          _package,
+          'ls',
+          'files',
+        ]);
+        if (!files
+            .split(RegExp(r'\s+'))
+            .any(
+              <String>{
+                'evidence-command.json',
+                'evidence-result.json',
+                'evidence-result.json.tmp',
+              }.contains,
+            )) {
+          return;
+        }
+      } on Object {
+        // The next bounded attempt decides whether app-private cleanup settled.
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
+    throw StateError('transient evidence state cannot be cleared');
   }
 
   Future<bool> commandWasConsumed() async {
