@@ -34,13 +34,29 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
   }
 
   Future<void> _consume() async {
+    EvidenceCommand? command;
     try {
-      final command = await _stateStore.consumeCommand();
+      command = await _stateStore.consumeCommand();
       if (command?.scenario == EvidenceScenario.localLogout) {
         await _runLocalLogout(command!);
       }
       if (mounted) setState(() => _command = command);
     } on Object {
+      if (command != null) {
+        try {
+          await _stateStore.writeResult(
+            EvidenceResult(
+              command: command,
+              state: EvidenceResultState.fail,
+              recovery: EvidenceRecovery.signedOut,
+              protectedIo: 0,
+              category: 'requestFailed',
+            ),
+          );
+        } on Object {
+          // The UI remains finite even if app-private result persistence fails.
+        }
+      }
       if (mounted) setState(() => _invalidCommand = true);
     }
   }
