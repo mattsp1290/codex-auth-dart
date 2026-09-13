@@ -117,3 +117,7 @@ app.*.symbols
 !**/ios/**/default.perspectivev3
 !/packages/flutter_tools/test/data/dart_dependencies_test/**/.packages
 !/dev/ci/**/Gemfile.lock
+!example/ayn_thor_evidence/pubspec.lock
+!example/ayn_thor_evidence/android/gradlew
+!example/ayn_thor_evidence/android/gradlew.bat
+!example/ayn_thor_evidence/android/gradle/wrapper/gradle-wrapper.jar

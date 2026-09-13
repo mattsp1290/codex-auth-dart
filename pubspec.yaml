@@ -1,0 +1,11 @@
+name: codex_auth
+description: A Dart-native, destination-restricted Codex subscription authentication client.
+version: 0.1.0
+repository: https://github.com/mattsp1290/codex-auth-dart
+environment:
+  sdk: ^3.13.0
+dependencies:
+  crypto: ^3.0.7
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.26.0
