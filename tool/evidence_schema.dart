@@ -150,7 +150,8 @@ final class EvidenceSchema {
     return value.entries.every(
       (entry) =>
           entry.key is String &&
-          RegExp(r'^[A-Za-z][A-Za-z0-9]{0,63}$').hasMatch(entry.key as String) &&
+          RegExp(r'^[A-Za-z][A-Za-z0-9]{0,63}$')
+              .hasMatch(entry.key as String) &&
           (entry.value is bool || entry.value is int),
     );
   }
