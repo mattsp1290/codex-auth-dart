@@ -85,13 +85,23 @@ final class _EvidenceHomeState extends State<_EvidenceHome> {
                 onPressed: _controller.cancel,
                 child: const Text('Cancel'),
               ),
-            ] else
+            ] else ...<Widget>[
               FilledButton(
                 onPressed: _controller.state == EvidenceState.waitingForApproval
                     ? null
                     : () => unawaited(_controller.startDeviceLogin()),
                 child: const Text('Start device login'),
               ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _controller.state == EvidenceState.passed
+                    ? () => unawaited(_controller.runRequiredModels())
+                    : null,
+                child: const Text('Run exact-model evidence'),
+              ),
+              for (final entry in _controller.tupleStates.entries)
+                Text('${entry.key}: ${entry.value.name}'),
+            ],
           ],
         ),
       ),
