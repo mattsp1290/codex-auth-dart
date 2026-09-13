@@ -141,6 +141,23 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     ),
   );
 
+  Future<void> _completeRehydration(
+    EvidenceCommand command,
+    AuthStatus status,
+    CatalogEvidenceResult result,
+  ) => _stateStore.writeResult(
+    EvidenceResult(
+      command: command,
+      state: status == AuthStatus.signedIn && result.allRequiredAdmitted
+          ? EvidenceResultState.pass
+          : EvidenceResultState.fail,
+      recovery: status == AuthStatus.signedIn
+          ? EvidenceRecovery.signedIn
+          : EvidenceRecovery.reauthenticationRequired,
+      protectedIo: status == AuthStatus.signedIn ? 1 : 0,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final command = _command;
@@ -179,6 +196,14 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         autoRunCatalogEvidence: true,
         onCatalogEvidenceFinished: (status, result) =>
             _completeCatalogEvidence(command, status, result),
+      );
+    }
+    if (command.scenario == EvidenceScenario.rehydrateAfterResume ||
+        command.scenario == EvidenceScenario.rehydrateAfterProcessDeath) {
+      return EvidenceHostApp(
+        autoRunCatalogEvidence: true,
+        onCatalogEvidenceFinished: (status, result) =>
+            _completeRehydration(command, status, result),
       );
     }
     return MaterialApp(home: _EvidenceLanding(command: command));
