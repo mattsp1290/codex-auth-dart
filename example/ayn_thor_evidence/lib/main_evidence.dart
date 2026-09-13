@@ -121,6 +121,26 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     ),
   );
 
+  Future<void> _completeCatalogEvidence(
+    EvidenceCommand command,
+    AuthStatus status,
+    CatalogEvidenceResult result,
+  ) => _stateStore.writeResult(
+    EvidenceResult(
+      command: command,
+      state:
+          status == AuthStatus.signedIn &&
+              result.allRequiredAdmitted &&
+              result.unavailableRejected
+          ? EvidenceResultState.pass
+          : EvidenceResultState.fail,
+      recovery: status == AuthStatus.signedIn
+          ? EvidenceRecovery.signedIn
+          : EvidenceRecovery.reauthenticationRequired,
+      protectedIo: status == AuthStatus.signedIn ? 1 : 0,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final command = _command;
@@ -152,6 +172,13 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         autoRunRequiredModels: true,
         onRequiredModelsFinished: (status, tuples) =>
             _completeExactModels(command, status, tuples),
+      );
+    }
+    if (command.scenario == EvidenceScenario.unavailableTuple) {
+      return EvidenceHostApp(
+        autoRunCatalogEvidence: true,
+        onCatalogEvidenceFinished: (status, result) =>
+            _completeCatalogEvidence(command, status, result),
       );
     }
     return MaterialApp(home: _EvidenceLanding(command: command));

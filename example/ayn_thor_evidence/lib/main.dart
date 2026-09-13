@@ -18,6 +18,8 @@ final class EvidenceHostApp extends StatelessWidget {
     this.onDeviceLoginFinished,
     this.autoRunRequiredModels = false,
     this.onRequiredModelsFinished,
+    this.autoRunCatalogEvidence = false,
+    this.onCatalogEvidenceFinished,
   });
 
   final bool autoStartDeviceLogin;
@@ -29,6 +31,9 @@ final class EvidenceHostApp extends StatelessWidget {
     Map<String, TupleEvidenceState> tuples,
   )?
   onRequiredModelsFinished;
+  final bool autoRunCatalogEvidence;
+  final Future<void> Function(AuthStatus status, CatalogEvidenceResult result)?
+  onCatalogEvidenceFinished;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -38,6 +43,8 @@ final class EvidenceHostApp extends StatelessWidget {
       onDeviceLoginFinished: onDeviceLoginFinished,
       autoRunRequiredModels: autoRunRequiredModels,
       onRequiredModelsFinished: onRequiredModelsFinished,
+      autoRunCatalogEvidence: autoRunCatalogEvidence,
+      onCatalogEvidenceFinished: onCatalogEvidenceFinished,
     ),
   );
 }
@@ -48,6 +55,8 @@ final class _EvidenceHome extends StatefulWidget {
     required this.onDeviceLoginFinished,
     required this.autoRunRequiredModels,
     required this.onRequiredModelsFinished,
+    required this.autoRunCatalogEvidence,
+    required this.onCatalogEvidenceFinished,
   });
   final bool autoStartDeviceLogin;
   final Future<void> Function(EvidenceEvent event, AuthStatus status)?
@@ -58,6 +67,9 @@ final class _EvidenceHome extends StatefulWidget {
     Map<String, TupleEvidenceState> tuples,
   )?
   onRequiredModelsFinished;
+  final bool autoRunCatalogEvidence;
+  final Future<void> Function(AuthStatus status, CatalogEvidenceResult result)?
+  onCatalogEvidenceFinished;
 
   @override
   State<_EvidenceHome> createState() => _EvidenceHomeState();
@@ -69,6 +81,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
   AuthStatus _durableStatus = AuthStatus.signedOut;
   var _automaticLoginStarted = false;
   var _automaticModelsStarted = false;
+  var _automaticCatalogStarted = false;
 
   @override
   void initState() {
@@ -107,6 +120,10 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
       _automaticModelsStarted = true;
       unawaited(_runAutomaticModels(status));
     }
+    if (widget.autoRunCatalogEvidence && !_automaticCatalogStarted) {
+      _automaticCatalogStarted = true;
+      unawaited(_runAutomaticCatalog(status));
+    }
   }
 
   Future<void> _runAutomaticModels(AuthStatus status) async {
@@ -114,6 +131,16 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
         ? await _controller.runRequiredModels()
         : Map<String, TupleEvidenceState>.unmodifiable(_controller.tupleStates);
     await widget.onRequiredModelsFinished?.call(status, tuples);
+  }
+
+  Future<void> _runAutomaticCatalog(AuthStatus status) async {
+    final result = status == AuthStatus.signedIn
+        ? await _controller.verifyCatalogAndUnavailable()
+        : const CatalogEvidenceResult(
+            allRequiredAdmitted: false,
+            unavailableRejected: false,
+          );
+    await widget.onCatalogEvidenceFinished?.call(status, result);
   }
 
   @override

@@ -14,6 +14,17 @@ enum TupleEvidenceState {
   failed,
 }
 
+/// Finite result for the catalog-only evidence row. It intentionally carries
+/// no snapshot content, model metadata, or request payloads.
+final class CatalogEvidenceResult {
+  const CatalogEvidenceResult({
+    required this.allRequiredAdmitted,
+    required this.unavailableRejected,
+  });
+  final bool allRequiredAdmitted;
+  final bool unavailableRejected;
+}
+
 /// Serializable only through its enum/category fields; no server text is held.
 final class EvidenceEvent {
   const EvidenceEvent(this.scenario, this.state, {this.category});
@@ -87,6 +98,41 @@ final class EvidenceController {
   void cancel() => _cancellation?.cancel();
 
   Future<AuthStatus> status() => _client.status();
+
+  /// Fetches one catalog and proves local admission/rejection only. It never
+  /// calls the Responses endpoint.
+  Future<CatalogEvidenceResult> verifyCatalogAndUnavailable() async {
+    try {
+      final snapshot = await _client.listModels(const CatalogQuery('0.154.0'));
+      var admitted = true;
+      for (final slug in tupleStates.keys) {
+        try {
+          await _client.admitModel(snapshot, slug, 'medium');
+        } on CodexAuthException {
+          admitted = false;
+        }
+      }
+      var unavailableRejected = false;
+      try {
+        await _client.admitModel(
+          snapshot,
+          'evidence-unavailable-model',
+          'medium',
+        );
+      } on CodexAuthException {
+        unavailableRejected = true;
+      }
+      return CatalogEvidenceResult(
+        allRequiredAdmitted: admitted,
+        unavailableRejected: unavailableRejected,
+      );
+    } on CodexAuthException {
+      return const CatalogEvidenceResult(
+        allRequiredAdmitted: false,
+        unavailableRejected: false,
+      );
+    }
+  }
 
   /// Runs the three exact admissions and minimal streams after an explicit UI
   /// action. It stores only finite state, never response text or metadata.
