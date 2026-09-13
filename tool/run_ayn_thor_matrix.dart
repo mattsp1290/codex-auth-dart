@@ -254,18 +254,18 @@ final class _Adb {
   }
 
   Future<void> writeCommand(String command) async {
-    final process = await Process.start(_adb, <String>[
+    final encoded = base64Encode(utf8.encode(command));
+    final result = await Process.run(_adb, <String>[
       '-s',
       _serial,
       'exec-out',
       'run-as',
       _package,
-      'tee',
-      'files/evidence-command.json',
+      'sh',
+      '-c',
+      "printf %s '$encoded' | base64 -d > files/evidence-command.json",
     ]);
-    process.stdin.write(command);
-    await process.stdin.close();
-    if (await process.exitCode != 0) {
+    if (result.exitCode != 0) {
       throw StateError('evidence command cannot be written');
     }
   }
