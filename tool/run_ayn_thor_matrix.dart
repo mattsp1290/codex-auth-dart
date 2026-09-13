@@ -73,8 +73,8 @@ Future<void> _run(
   if (!await runner.installedDigestMatches(expectedDigest)) {
     throw StateError('installed APK does not match candidate');
   }
-  setStage('clear-previous-result');
-  await runner.clearPreviousResult();
+  setStage('clear-previous-state');
+  await runner.clearTransientState();
   final nonce = _nonce();
   final command = jsonEncode(<String, Object?>{
     'schemaVersion': 1,
@@ -85,27 +85,36 @@ Future<void> _run(
   });
   setStage('write-command');
   await runner.writeCommand(command);
-  setStage('launch');
-  await runner.launch();
-  setStage('finite-result');
-  final raw = await runner.waitForResult(const Duration(minutes: 15));
-  setStage('validate-result');
-  final result = EvidenceSchema.validateRawResult(
-    raw,
-    scenario: options.scenario,
-    packageCommit: options.packageCommit,
-    nonce: nonce,
-  );
-  stdout.writeln(
-    jsonEncode(<String, Object?>{
-      'device': 'ayn-thor',
-      'scenario': options.scenario,
-      'state': result['state'],
-      'recovery': result['recovery'],
-      'protectedIo': result['protectedIo'],
-      if (result['category'] != null) 'category': result['category'],
-    }),
-  );
+  try {
+    setStage('launch');
+    await runner.launch();
+    setStage('finite-result');
+    final raw = await runner.waitForResult(const Duration(minutes: 15));
+    setStage('command-consumption');
+    if (!await runner.commandWasConsumed()) {
+      throw StateError('evidence command was not consumed');
+    }
+    setStage('validate-result');
+    final result = EvidenceSchema.validateRawResult(
+      raw,
+      scenario: options.scenario,
+      packageCommit: options.packageCommit,
+      nonce: nonce,
+    );
+    stdout.writeln(
+      jsonEncode(<String, Object?>{
+        'device': 'ayn-thor',
+        'scenario': options.scenario,
+        'state': result['state'],
+        'recovery': result['recovery'],
+        'protectedIo': result['protectedIo'],
+        if (result['category'] != null) 'category': result['category'],
+      }),
+    );
+  } finally {
+    setStage('cleanup');
+    await runner.clearTransientState();
+  }
 }
 
 final class _Options {
@@ -223,15 +232,29 @@ final class _Adb {
     }
   }
 
-  Future<void> clearPreviousResult() async {
+  Future<void> clearTransientState() async {
     await _run(<String>[
       'exec-out',
       'run-as',
       _package,
-      'rm',
-      '-f',
-      'files/evidence-result.json',
+      'sh',
+      '-c',
+      'rm -f files/evidence-command.json files/evidence-result.json files/evidence-result.json.tmp',
     ]);
+  }
+
+  Future<bool> commandWasConsumed() async {
+    final result = await Process.run(_adb, <String>[
+      '-s',
+      _serial,
+      'exec-out',
+      'run-as',
+      _package,
+      'sh',
+      '-c',
+      'test ! -e files/evidence-command.json',
+    ]);
+    return result.exitCode == 0;
   }
 
   Future<void> launch() async {
