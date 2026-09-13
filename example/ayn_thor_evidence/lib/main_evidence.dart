@@ -98,6 +98,29 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     );
   }
 
+  Future<void> _completeExactModels(
+    EvidenceCommand command,
+    AuthStatus status,
+    Map<String, TupleEvidenceState> tuples,
+  ) => _stateStore.writeResult(
+    EvidenceResult(
+      command: command,
+      state:
+          status == AuthStatus.signedIn &&
+              tuples.length == 3 &&
+              tuples.values.every(
+                (value) => value == TupleEvidenceState.executedIdentityVerified,
+              )
+          ? EvidenceResultState.pass
+          : EvidenceResultState.fail,
+      recovery: status == AuthStatus.signedIn
+          ? EvidenceRecovery.signedIn
+          : EvidenceRecovery.reauthenticationRequired,
+      // One catalog request plus one Responses stream per required tuple.
+      protectedIo: status == AuthStatus.signedIn ? 4 : 0,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final command = _command;
@@ -122,6 +145,13 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         autoStartDeviceLogin: true,
         onDeviceLoginFinished: (event, status) =>
             _completeDeviceLoginOutcome(command, event, status),
+      );
+    }
+    if (command.scenario == EvidenceScenario.exactModels) {
+      return EvidenceHostApp(
+        autoRunRequiredModels: true,
+        onRequiredModelsFinished: (status, tuples) =>
+            _completeExactModels(command, status, tuples),
       );
     }
     return MaterialApp(home: _EvidenceLanding(command: command));

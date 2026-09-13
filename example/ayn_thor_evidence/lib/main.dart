@@ -16,11 +16,19 @@ final class EvidenceHostApp extends StatelessWidget {
     super.key,
     this.autoStartDeviceLogin = false,
     this.onDeviceLoginFinished,
+    this.autoRunRequiredModels = false,
+    this.onRequiredModelsFinished,
   });
 
   final bool autoStartDeviceLogin;
   final Future<void> Function(EvidenceEvent event, AuthStatus status)?
   onDeviceLoginFinished;
+  final bool autoRunRequiredModels;
+  final Future<void> Function(
+    AuthStatus status,
+    Map<String, TupleEvidenceState> tuples,
+  )?
+  onRequiredModelsFinished;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -28,6 +36,8 @@ final class EvidenceHostApp extends StatelessWidget {
     home: _EvidenceHome(
       autoStartDeviceLogin: autoStartDeviceLogin,
       onDeviceLoginFinished: onDeviceLoginFinished,
+      autoRunRequiredModels: autoRunRequiredModels,
+      onRequiredModelsFinished: onRequiredModelsFinished,
     ),
   );
 }
@@ -36,10 +46,18 @@ final class _EvidenceHome extends StatefulWidget {
   const _EvidenceHome({
     required this.autoStartDeviceLogin,
     required this.onDeviceLoginFinished,
+    required this.autoRunRequiredModels,
+    required this.onRequiredModelsFinished,
   });
   final bool autoStartDeviceLogin;
   final Future<void> Function(EvidenceEvent event, AuthStatus status)?
   onDeviceLoginFinished;
+  final bool autoRunRequiredModels;
+  final Future<void> Function(
+    AuthStatus status,
+    Map<String, TupleEvidenceState> tuples,
+  )?
+  onRequiredModelsFinished;
 
   @override
   State<_EvidenceHome> createState() => _EvidenceHomeState();
@@ -50,6 +68,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
   late EvidenceController _controller;
   AuthStatus _durableStatus = AuthStatus.signedOut;
   var _automaticLoginStarted = false;
+  var _automaticModelsStarted = false;
 
   @override
   void initState() {
@@ -84,6 +103,17 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
   Future<void> _readDurableStatus() async {
     final status = await _controller.status();
     if (mounted) setState(() => _durableStatus = status);
+    if (widget.autoRunRequiredModels && !_automaticModelsStarted) {
+      _automaticModelsStarted = true;
+      unawaited(_runAutomaticModels(status));
+    }
+  }
+
+  Future<void> _runAutomaticModels(AuthStatus status) async {
+    final tuples = status == AuthStatus.signedIn
+        ? await _controller.runRequiredModels()
+        : Map<String, TupleEvidenceState>.unmodifiable(_controller.tupleStates);
+    await widget.onRequiredModelsFinished?.call(status, tuples);
   }
 
   @override

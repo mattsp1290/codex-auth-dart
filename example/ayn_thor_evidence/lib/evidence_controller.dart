@@ -90,7 +90,7 @@ final class EvidenceController {
 
   /// Runs the three exact admissions and minimal streams after an explicit UI
   /// action. It stores only finite state, never response text or metadata.
-  Future<void> runRequiredModels() async {
+  Future<Map<String, TupleEvidenceState>> runRequiredModels() async {
     try {
       final snapshot = await _client.listModels(const CatalogQuery('0.154.0'));
       for (final slug in tupleStates.keys.toList(growable: false)) {
@@ -129,5 +129,6 @@ final class EvidenceController {
       }
       _notify();
     }
+    return Map<String, TupleEvidenceState>.unmodifiable(tupleStates);
   }
 }
