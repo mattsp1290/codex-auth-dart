@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:codex_auth/codex_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -6,6 +8,7 @@ import 'evidence_controller.dart';
 import 'evidence_controls.dart';
 import 'evidence_state_store.dart';
 import 'main.dart';
+import 'redirect_evidence.dart';
 import 'secure_credential_store.dart';
 
 /// Compile-time isolated entrypoint for a single consumed evidence command.
@@ -158,6 +161,18 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     ),
   );
 
+  Future<void> _runRedirectMatrix(EvidenceCommand command) async {
+    final passed = await RedirectEvidence().run();
+    await _stateStore.writeResult(
+      EvidenceResult(
+        command: command,
+        state: passed ? EvidenceResultState.pass : EvidenceResultState.fail,
+        recovery: EvidenceRecovery.signedOut,
+        protectedIo: 25,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final command = _command;
@@ -204,6 +219,12 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         autoRunCatalogEvidence: true,
         onCatalogEvidenceFinished: (status, result) =>
             _completeRehydration(command, status, result),
+      );
+    }
+    if (command.scenario == EvidenceScenario.redirectMatrix) {
+      unawaited(_runRedirectMatrix(command));
+      return const MaterialApp(
+        home: Scaffold(body: Center(child: Text('Running redirect evidence'))),
       );
     }
     return MaterialApp(home: _EvidenceLanding(command: command));

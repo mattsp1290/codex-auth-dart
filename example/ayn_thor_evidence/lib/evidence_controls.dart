@@ -17,6 +17,7 @@ enum EvidenceScenario {
   malformedStore('malformed-store'),
   unavailableTuple('unavailable-tuple'),
   exactModels('exact-models'),
+  redirectMatrix('redirect-matrix'),
   localLogout('local-logout');
 
   const EvidenceScenario(this.wireName);

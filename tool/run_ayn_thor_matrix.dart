@@ -24,6 +24,7 @@ const _scenarios = <String>{
   'malformed-store',
   'unavailable-tuple',
   'exact-models',
+  'redirect-matrix',
   'local-logout',
 };
 const _destructive = <String>{
