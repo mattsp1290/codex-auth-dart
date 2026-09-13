@@ -68,13 +68,13 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         transport: DartIoHttpTransport(),
       ),
     );
-    await client.logoutLocal();
+    await client.logoutLocal().timeout(const Duration(seconds: 15));
     final status = await CodexAuthClient(
       CodexAuthOptions(
         store: SecureCredentialStore(),
         transport: DartIoHttpTransport(),
       ),
-    ).status();
+    ).status().timeout(const Duration(seconds: 15));
     await _stateStore.writeResult(
       EvidenceResult(
         command: command,
