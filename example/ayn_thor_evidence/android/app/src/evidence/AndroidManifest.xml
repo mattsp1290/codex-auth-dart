@@ -3,7 +3,7 @@
     <application>
         <activity android:name=".MainActivity" tools:node="remove" />
         <activity
-            android:name=".EvidenceActivity"
+            android:name="com.mattsp1290.codexauth.ayn_thor_evidence.EvidenceActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""

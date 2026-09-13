@@ -327,7 +327,7 @@ final class _Adb {
       'am',
       'start',
       '-n',
-      '$_package/.EvidenceActivity',
+      '$_package/com.mattsp1290.codexauth.ayn_thor_evidence.EvidenceActivity',
     ]);
   }
 
