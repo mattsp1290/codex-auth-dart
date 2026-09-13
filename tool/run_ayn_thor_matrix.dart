@@ -180,7 +180,7 @@ final class _Adb {
       'exec-out',
       'cat',
       apkPath,
-    ]);
+    ], stdoutEncoding: null);
     if (result.exitCode != 0 || result.stdout is! List<int>) return false;
     return sha256.convert(result.stdout as List<int>).toString() == expected;
   }
