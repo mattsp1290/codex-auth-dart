@@ -251,8 +251,13 @@ final class _Adb implements AynThorMatrixAdapter {
   Future<void> clearTransientState() async {
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
-        await _run(<String>[
-          'shell',
+        // `adb shell` reconstructs a remote command string and can split the
+        // fixed `sh -c` expression before the app UID receives it. `exec-out`
+        // preserves this argument boundary, as the command-write path does.
+        final result = await _executor.runText(_adb, <String>[
+          '-s',
+          _serial,
+          'exec-out',
           'run-as',
           _package,
           'sh',
@@ -262,7 +267,10 @@ final class _Adb implements AynThorMatrixAdapter {
               'test ! -e files/evidence-command.json && '
               'test ! -e files/evidence-result.json && '
               'test ! -e files/evidence-result.json.tmp',
-        ]);
+        ], timeout: _commandTimeout);
+        if (!result.succeeded) {
+          throw StateError('transient evidence state cannot be cleared');
+        }
         return;
       } on Object {
         // The next bounded attempt decides whether app-private cleanup settled.
