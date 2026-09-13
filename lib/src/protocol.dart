@@ -13,6 +13,7 @@ const String deviceRedirectUri = 'https://auth.openai.com/deviceauth/callback';
 const String deviceVerificationPath = '/codex/device';
 const Duration deviceAuthorizationCap = Duration(minutes: 15);
 const String frozenCatalogClientVersion = '0.154.0';
+const String codexOriginator = 'codex_cli_rs';
 
 Uri protocolUri(String origin, String path, [Map<String, String>? query]) {
   final uri = Uri.parse(origin).replace(path: path, queryParameters: query);

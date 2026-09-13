@@ -134,6 +134,11 @@ void main() {
       final body = jsonDecode(
         utf8.decode(transport.requests.last.body),
       ) as Map<String, Object?>;
+      expect(transport.requests.last.headers['originator'], 'codex_cli_rs');
+      expect(
+        transport.requests.last.headers['chatgpt-account-id'],
+        'test-account',
+      );
       expect(body['model'], 'gpt-5.6-sol');
       expect(body['reasoning'], <String, String>{'effort': 'medium'});
       expect(

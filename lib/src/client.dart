@@ -571,7 +571,7 @@ final class CodexAuthClient {
 
   Map<String, String> _authHeaders(Credentials credentials) => <String, String>{
     'authorization': 'Bearer ${credentials.accessToken}',
-    'originator': 'codex_auth_dart',
+    'originator': codexOriginator,
     'chatgpt-account-id': credentials.accountId,
   };
 
