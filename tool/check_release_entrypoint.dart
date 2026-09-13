@@ -9,7 +9,11 @@ Future<void> main(List<String> arguments) async {
   if (!await ordinary.exists()) throw StateError('ordinary entrypoint missing');
   final queued = <File>[ordinary];
   final visited = <String>{};
-  const forbidden = <String>{'main_evidence.dart', 'evidence_controls.dart'};
+  const forbidden = <String>{
+    'main_evidence.dart',
+    'evidence_controls.dart',
+    'evidence_state_store.dart',
+  };
   while (queued.isNotEmpty) {
     final file = queued.removeLast();
     if (!visited.add(file.absolute.path)) continue;
