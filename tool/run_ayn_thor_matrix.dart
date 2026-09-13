@@ -130,6 +130,8 @@ Future<void> _run(
     rethrow;
   } finally {
     try {
+      setStage('cleanup-stop');
+      await runner.stop();
       setStage('cleanup-clear');
       await runner.clearTransientState();
       if (redirect != null) {
@@ -343,7 +345,7 @@ final class _Adb {
   }
 
   Future<void> launch() async {
-    await _run(<String>['shell', 'am', 'force-stop', _package]);
+    await stop();
     await _run(<String>[
       'shell',
       'am',
@@ -352,6 +354,8 @@ final class _Adb {
       '$_package/com.mattsp1290.codexauth.ayn_thor_evidence.EvidenceActivity',
     ]);
   }
+
+  Future<void> stop() => _run(<String>['shell', 'am', 'force-stop', _package]);
 
   Future<String> waitForResult(Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
