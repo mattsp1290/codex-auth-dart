@@ -116,11 +116,22 @@ void _verifyCheckout(Directory root) {
   }
   final required = <bool>[
     files[0].readAsStringSync().contains('/deviceauth/usercode'),
+    files[0].readAsStringSync().contains('/deviceauth/token'),
     files[0].readAsStringSync().contains('device_auth_id'),
+    files[0].readAsStringSync().contains('user_code'),
     files[0].readAsStringSync().contains('code_verifier'),
+    files[0].readAsStringSync().contains('authorization_code'),
+    files[0].readAsStringSync().contains('Duration::from_secs(15 * 60)'),
+    files[0].readAsStringSync().contains('/deviceauth/callback'),
     files[1].readAsStringSync().contains('app_EMoamEEZ73f0CkXaXp7hrann'),
+    files[1].readAsStringSync().contains('grant_type: "refresh_token"'),
+    files[1].readAsStringSync().contains('refresh_token: Option<String>'),
+    files[1].readAsStringSync().contains('"invalid_grant"'),
     files[2].readAsStringSync().contains('client_version'),
+    files[2].readAsStringSync().contains('Method::GET'),
     files[3].readAsStringSync().contains('"/responses"'),
+    files[3].readAsStringSync().contains('Method::POST'),
+    files[3].readAsStringSync().contains('spawn_response_stream'),
   ];
   if (required.any((present) => !present)) {
     throw StateError(
