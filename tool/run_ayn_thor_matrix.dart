@@ -307,7 +307,7 @@ final class _Adb {
       } on Object {
         // The next bounded attempt decides whether app-private cleanup settled.
       }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
+      await Future<void>.delayed(const Duration(seconds: 1));
     }
     throw StateError('transient evidence state cannot be cleared');
   }
