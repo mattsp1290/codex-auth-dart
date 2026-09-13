@@ -279,7 +279,7 @@ final class _Adb {
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         await _run(<String>[
-          'exec-out',
+          'shell',
           'run-as',
           _package,
           'rm',
@@ -289,7 +289,7 @@ final class _Adb {
           'files/evidence-result.json.tmp',
         ]);
         final files = await _run(<String>[
-          'exec-out',
+          'shell',
           'run-as',
           _package,
           'ls',
