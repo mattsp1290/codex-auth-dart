@@ -91,6 +91,7 @@ Future<void> _run(
   });
   setStage('write-command');
   await runner.writeCommand(command);
+  Object? primaryFailure;
   try {
     setStage('launch');
     await runner.launch();
@@ -121,10 +122,17 @@ Future<void> _run(
         if (result['category'] != null) 'category': result['category'],
       }),
     );
+  } on Object catch (error) {
+    primaryFailure = error;
+    rethrow;
   } finally {
     setStage('cleanup');
-    await runner.clearTransientState();
-    if (redirect != null) await redirect.close(runner);
+    try {
+      await runner.clearTransientState();
+      if (redirect != null) await redirect.close(runner);
+    } on Object {
+      if (primaryFailure == null) rethrow;
+    }
   }
 }
 
