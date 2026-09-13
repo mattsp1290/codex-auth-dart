@@ -5,7 +5,8 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 
-import 'evidence_schema.dart';
+import 'src/ayn_thor_matrix_engine.dart';
+import 'src/bounded_process_executor.dart';
 
 const _package = 'com.mattsp1290.codexauth.ayn_thor_evidence.evidence';
 const _scenarios = <String>{
@@ -40,108 +41,62 @@ const _destructive = <String>{
 /// Drives a single app-private finite evidence command without emitting a
 /// serial, PID, app-private path, nonce, or raw result.
 Future<void> main(List<String> arguments) async {
-  var stage = 'arguments';
-  try {
-    await _run(arguments, (value) {
-      stage = value;
-      stderr.writeln('matrix runner stage $value');
-    });
-  } on Object {
-    // A closed stage label makes host/device failures diagnosable without
-    // exposing command lines, local paths, serials, nonces, or raw records.
-    stderr.writeln('matrix runner rejected at $stage');
-    exitCode = 1;
-  }
+  exitCode = await runMatrixCli(arguments);
 }
 
-Future<void> _run(
-  List<String> arguments,
-  void Function(String stage) setStage,
-) async {
-  final options = _Options.parse(arguments);
-  setStage('device-selection');
-  final serial = Platform.environment['ANDROID_SERIAL'];
-  if (serial == null || serial.isEmpty) {
-    throw StateError('one authorized Android device must be selected');
-  }
-  final runner = _Adb(serial);
-  setStage('physical-device');
-  await runner.requirePhysicalDevice();
-  if (_destructive.contains(options.scenario) && !options.confirmDestructive) {
-    throw StateError('destructive scenario requires explicit confirmation');
-  }
-  final expectedDigest = await _sha256(File(options.apk));
-  setStage('install');
-  await runner.install(options.apk);
-  setStage('installed-digest');
-  if (!await runner.installedDigestMatches(expectedDigest)) {
-    throw StateError('installed APK does not match candidate');
-  }
-  setStage('clear-previous-state');
-  await runner.clearTransientState();
-  _RedirectFixture? redirect;
-  if (options.scenario == 'redirect-matrix') {
-    setStage('redirect-fixture');
-    redirect = await _RedirectFixture.start(runner);
-  }
-  final nonce = _nonce();
-  final command = jsonEncode(<String, Object?>{
-    'schemaVersion': 1,
-    'scenario': options.scenario,
-    'packageCommit': options.packageCommit,
-    'flavor': 'evidence',
-    'nonce': nonce,
-  });
-  setStage('write-command');
-  await runner.writeCommand(command);
-  Object? primaryFailure;
+typedef MatrixAdapterFactory = AynThorMatrixAdapter Function(
+  String serial,
+  String apk,
+);
+
+Future<int> runMatrixCli(
+  List<String> arguments, {
+  MatrixAdapterFactory? adapterFactory,
+  Map<String, String>? environment,
+  StringSink? stdoutSink,
+  StringSink? stderrSink,
+}) async {
+  final out = stdoutSink ?? stdout;
+  final err = stderrSink ?? stderr;
   try {
-    setStage('launch');
-    await runner.launch();
-    setStage('finite-result');
-    final raw = await runner.waitForResult(options.resultTimeout);
-    setStage('command-consumption');
-    if (!await runner.commandWasConsumed()) {
-      throw StateError('evidence command was not consumed');
+    final options = _Options.parse(arguments);
+    err.writeln('matrix runner stage ${MatrixStage.deviceSelection.label}');
+    final serial = (environment ?? Platform.environment)['ANDROID_SERIAL'];
+    if (serial == null || serial.isEmpty) {
+      throw const MatrixRunFailure(primaryStage: MatrixStage.deviceSelection);
     }
-    setStage('validate-result');
-    final result = EvidenceSchema.validateRawResult(
-      raw,
-      scenario: options.scenario,
-      packageCommit: options.packageCommit,
-      nonce: nonce,
+    if (_destructive.contains(options.scenario) &&
+        !options.confirmDestructive) {
+      throw const MatrixRunFailure(primaryStage: MatrixStage.arguments);
+    }
+    final apk = File(options.apk);
+    final expectedDigest = await _sha256(apk);
+    final expectedBytes = await apk.length();
+    final result = await runAynThorMatrixEngine(
+      request: MatrixRunRequest(
+        scenario: options.scenario,
+        packageCommit: options.packageCommit,
+        expectedDigest: expectedDigest,
+        expectedApkBytes: expectedBytes,
+        nonce: _nonce(),
+        resultTimeout: options.resultTimeout,
+      ),
+      adapter: (adapterFactory ?? _Adb.new)(serial, options.apk),
+      reportProgress: (stage) => err.writeln('matrix runner stage $stage'),
     );
-    if (redirect != null) {
-      setStage('redirect-validation');
-      await redirect.verify();
+    out.writeln(result.safeJson);
+    return 0;
+  } on MatrixRunFailure catch (failure) {
+    err.writeln('matrix runner rejected at ${failure.rejectionLabel}');
+    if (failure.primaryStage != null && failure.cleanupStage != null) {
+      err.writeln(
+        'matrix runner cleanup incomplete at ${failure.cleanupStage!.label}',
+      );
     }
-    stdout.writeln(
-      jsonEncode(<String, Object?>{
-        'device': 'ayn-thor',
-        'scenario': options.scenario,
-        'state': result['state'],
-        'recovery': result['recovery'],
-        'protectedIo': result['protectedIo'],
-        if (result['category'] != null) 'category': result['category'],
-      }),
-    );
-  } on Object catch (error) {
-    primaryFailure = error;
-    rethrow;
-  } finally {
-    try {
-      setStage('cleanup-stop');
-      await runner.stop();
-      await Future<void>.delayed(const Duration(seconds: 2));
-      setStage('cleanup-clear');
-      await runner.clearTransientState();
-      if (redirect != null) {
-        setStage('cleanup-redirect');
-        await redirect.close(runner);
-      }
-    } on Object {
-      if (primaryFailure == null) rethrow;
-    }
+    return 1;
+  } on Object {
+    err.writeln('matrix runner rejected at ${MatrixStage.arguments.label}');
+    return 1;
   }
 }
 
@@ -196,11 +151,17 @@ final class _Options {
   }
 }
 
-final class _Adb {
-  _Adb(this._serial) : _adb = _resolveAdb();
+final class _Adb implements AynThorMatrixAdapter {
+  _Adb(this._serial, this._apk)
+    : _adb = _resolveAdb(),
+      _executor = const BoundedProcessExecutor();
   final String _serial;
+  final String _apk;
   final String _adb;
+  final BoundedProcessExecutor _executor;
+  static const _commandTimeout = Duration(seconds: 30);
 
+  @override
   Future<void> requirePhysicalDevice() async {
     final state = await _run(<String>['get-state']);
     if (state.trim() != 'device') {
@@ -235,33 +196,43 @@ final class _Adb {
   Future<String> _property(String name) async =>
       (await _run(<String>['shell', 'getprop', name])).trim();
 
-  Future<void> install(String apk) async {
-    if (!await File(apk).exists()) {
+  @override
+  Future<void> install() async {
+    if (!await File(_apk).exists()) {
       throw StateError('evidence APK is unavailable');
     }
-    await _run(<String>['install', '-r', apk]);
+    await _run(<String>[
+      'install',
+      '-r',
+      _apk,
+    ], timeout: const Duration(minutes: 2));
   }
 
-  Future<bool> installedDigestMatches(String expected) async {
+  @override
+  Future<bool> installedDigestMatches(
+    String expected,
+    int expectedBytes,
+  ) async {
     final output = await _run(<String>['shell', 'pm', 'path', _package]);
     const prefix = 'package:';
     final path = output.trim();
     if (!path.startsWith(prefix) || path.length == prefix.length) return false;
     final apkPath = path.substring(prefix.length);
-    final result = await Process.run(_adb, <String>[
-      '-s',
-      _serial,
-      'exec-out',
-      'cat',
-      apkPath,
-    ], stdoutEncoding: null);
-    if (result.exitCode != 0 || result.stdout is! List<int>) return false;
-    return sha256.convert(result.stdout as List<int>).toString() == expected;
+    final result = await _executor.runSha256(
+      _adb,
+      <String>['-s', _serial, 'exec-out', 'cat', apkPath],
+      expectedBytes: expectedBytes,
+      timeout: const Duration(minutes: 2),
+    );
+    return result.succeeded &&
+        result.byteCount == expectedBytes &&
+        result.digest == expected;
   }
 
+  @override
   Future<void> writeCommand(String command) async {
     final encoded = base64Encode(utf8.encode(command));
-    final result = await Process.run(_adb, <String>[
+    final result = await _executor.runText(_adb, <String>[
       '-s',
       _serial,
       'exec-out',
@@ -270,12 +241,13 @@ final class _Adb {
       'sh',
       '-c',
       "printf %s '$encoded' | base64 -d > files/evidence-command.json",
-    ]);
-    if (result.exitCode != 0) {
+    ], timeout: _commandTimeout);
+    if (!result.succeeded) {
       throw StateError('evidence command cannot be written');
     }
   }
 
+  @override
   Future<void> clearTransientState() async {
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
@@ -283,11 +255,13 @@ final class _Adb {
           'shell',
           'run-as',
           _package,
-          'rm',
-          '-f',
-          'files/evidence-command.json',
-          'files/evidence-result.json',
-          'files/evidence-result.json.tmp',
+          'sh',
+          '-c',
+          'rm -f files/evidence-command.json files/evidence-result.json '
+              'files/evidence-result.json.tmp && '
+              'test ! -e files/evidence-command.json && '
+              'test ! -e files/evidence-result.json && '
+              'test ! -e files/evidence-result.json.tmp',
         ]);
         return;
       } on Object {
@@ -298,8 +272,9 @@ final class _Adb {
     throw StateError('transient evidence state cannot be cleared');
   }
 
+  @override
   Future<bool> commandWasConsumed() async {
-    final result = await Process.run(_adb, <String>[
+    final result = await _executor.runText(_adb, <String>[
       '-s',
       _serial,
       'exec-out',
@@ -308,26 +283,32 @@ final class _Adb {
       'sh',
       '-c',
       'test ! -e files/evidence-command.json',
-    ]);
-    return result.exitCode == 0;
+    ], timeout: _commandTimeout);
+    return result.succeeded;
   }
 
-  Future<void> reversePort(int port) =>
-      _run(<String>['reverse', 'tcp:$port', 'tcp:$port']);
+  @override
+  Future<void> reverseRedirectPort() => _run(<String>[
+    'reverse',
+    'tcp:${_RedirectFixture.port}',
+    'tcp:${_RedirectFixture.port}',
+  ]);
 
-  Future<void> removeReversePort(int port) async {
-    final result = await Process.run(_adb, <String>[
+  @override
+  Future<void> removeReverseRedirectPort() async {
+    final result = await _executor.runText(_adb, <String>[
       '-s',
       _serial,
       'reverse',
       '--remove',
-      'tcp:$port',
-    ]);
-    if (result.exitCode != 0) {
+      'tcp:${_RedirectFixture.port}',
+    ], timeout: _commandTimeout);
+    if (!result.succeeded) {
       throw StateError('redirect mapping cleanup failed');
     }
   }
 
+  @override
   Future<void> launch() async {
     await stop();
     await _run(<String>[
@@ -339,12 +320,14 @@ final class _Adb {
     ]);
   }
 
+  @override
   Future<void> stop() => _run(<String>['shell', 'am', 'force-stop', _package]);
 
+  @override
   Future<String> waitForResult(Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      final result = await Process.run(_adb, <String>[
+      final result = await _executor.runText(_adb, <String>[
         '-s',
         _serial,
         'exec-out',
@@ -352,61 +335,64 @@ final class _Adb {
         _package,
         'cat',
         'files/evidence-result.json',
-      ]);
-      if (result.exitCode == 0 &&
-          result.stdout is String &&
-          (result.stdout as String).isNotEmpty) {
-        return result.stdout as String;
+      ], timeout: _commandTimeout);
+      if (result.succeeded && result.stdoutText.isNotEmpty) {
+        return result.stdoutText;
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
     throw StateError('finite evidence result timed out');
   }
 
-  Future<String> _run(List<String> arguments) async {
-    final result = await Process.run(_adb, <String>[
+  Future<String> _run(
+    List<String> arguments, {
+    Duration timeout = _commandTimeout,
+  }) async {
+    final result = await _executor.runText(_adb, <String>[
       '-s',
       _serial,
       ...arguments,
-    ]);
-    if (result.exitCode != 0) throw StateError('Android command failed');
-    return result.stdout as String;
+    ], timeout: timeout);
+    if (!result.succeeded) throw StateError('Android command failed');
+    return result.stdoutText;
   }
+
+  @override
+  Future<MatrixRedirectFixture> startRedirectFixture() =>
+      _RedirectFixture.start();
+
+  @override
+  Future<void> cleanupSettleDelay() =>
+      Future<void>.delayed(const Duration(seconds: 2));
 }
 
-final class _RedirectFixture {
+final class _RedirectFixture implements MatrixRedirectFixture {
   _RedirectFixture(this._process);
-  static const _port = 8787;
+  static const port = 8787;
   final Process _process;
 
-  static Future<_RedirectFixture> start(_Adb adb) async {
+  static Future<_RedirectFixture> start() async {
     final toolDirectory = File.fromUri(Platform.script).parent;
     final process = await Process.start(Platform.resolvedExecutable, <String>[
       '${toolDirectory.path}${Platform.pathSeparator}redirect_probe_server.dart',
-      '$_port',
+      '$port',
     ]);
-    final fixture = _RedirectFixture(process);
-    try {
-      await fixture._awaitReady();
-      await adb.reversePort(_port);
-      return fixture;
-    } on Object {
-      process.kill(ProcessSignal.sigterm);
-      await process.exitCode;
-      rethrow;
-    }
+    return _RedirectFixture(process);
   }
 
-  Future<void> _awaitReady() async {
+  @override
+  Future<void> awaitReady() async {
     for (var attempt = 0; attempt < 20; attempt++) {
       try {
         final client = HttpClient();
         try {
-          final request = await client.getUrl(
-            Uri.parse('http://127.0.0.1:$_port/status'),
+          final request = await client
+              .getUrl(Uri.parse('http://127.0.0.1:$port/status'))
+              .timeout(const Duration(seconds: 2));
+          final response = await request.close().timeout(
+            const Duration(seconds: 2),
           );
-          final response = await request.close();
-          await response.drain<void>();
+          await response.drain<void>().timeout(const Duration(seconds: 2));
           if (response.statusCode == HttpStatus.ok) return;
         } finally {
           client.close(force: true);
@@ -419,17 +405,25 @@ final class _RedirectFixture {
     throw StateError('redirect fixture did not start');
   }
 
+  @override
   Future<void> verify() async {
     final client = HttpClient();
     try {
-      final request = await client.getUrl(
-        Uri.parse('http://127.0.0.1:$_port/status'),
+      final request = await client
+          .getUrl(Uri.parse('http://127.0.0.1:$port/status'))
+          .timeout(const Duration(seconds: 2));
+      final response = await request.close().timeout(
+        const Duration(seconds: 2),
       );
-      final response = await request.close();
       if (response.statusCode != HttpStatus.ok) {
         throw StateError('redirect status unavailable');
       }
-      final value = jsonDecode(await utf8.decoder.bind(response).join());
+      final value = jsonDecode(
+        await utf8.decoder
+            .bind(response)
+            .join()
+            .timeout(const Duration(seconds: 2)),
+      );
       if (value is! Map || value['cases'] is! Map || value['target'] is! Map) {
         throw StateError('redirect status invalid');
       }
@@ -451,12 +445,14 @@ final class _RedirectFixture {
     }
   }
 
-  Future<void> close(_Adb adb) async {
+  @override
+  Future<void> close() async {
+    _process.kill(ProcessSignal.sigterm);
     try {
-      await adb.removeReversePort(_port);
-    } finally {
-      _process.kill(ProcessSignal.sigterm);
-      await _process.exitCode;
+      await _process.exitCode.timeout(const Duration(seconds: 1));
+    } on TimeoutException {
+      _process.kill(ProcessSignal.sigkill);
+      await _process.exitCode.timeout(const Duration(seconds: 1));
     }
   }
 
@@ -525,18 +521,6 @@ String _resolveAdb() {
       '$root${Platform.pathSeparator}platform-tools${Platform.pathSeparator}adb',
     );
     if (candidate.existsSync()) return candidate.path;
-  }
-  final doctor = Process.runSync('flutter', <String>['doctor', '-v']);
-  if (doctor.exitCode == 0 && doctor.stdout is String) {
-    final match = RegExp(r'Android SDK at ([^\r\n]+)')
-        .firstMatch(doctor.stdout as String);
-    final root = match?.group(1)?.trim();
-    if (root != null) {
-      final candidate = File(
-        '$root${Platform.pathSeparator}platform-tools${Platform.pathSeparator}adb',
-      );
-      if (candidate.existsSync()) return candidate.path;
-    }
   }
   return 'adb';
 }
