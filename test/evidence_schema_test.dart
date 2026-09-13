@@ -62,6 +62,11 @@ Map<String, Object?> _record() => <String, Object?>{
   ],
 };
 
+String _rawResult({required String nonce}) =>
+    '''
+{"schemaVersion":1,"scenario":"local-logout","packageCommit":"${'a' * 40}","flavor":"evidence","nonce":"$nonce","state":"pass","recovery":"signed-out","protectedIo":0}
+''';
+
 void main() {
   test('accepts a complete finite evidence record', () {
     expect(EvidenceSchema.validateRenderable(_record()), isNotNull);
@@ -125,6 +130,27 @@ void main() {
     };
     expect(
       () => EvidenceSchema.validateRenderable(incomplete),
+      throwsFormatException,
+    );
+  });
+
+  test('raw result rejects stale nonces and unknown fields', () {
+    expect(
+      () => EvidenceSchema.validateRawResult(
+        _rawResult(nonce: 'd' * 64),
+        scenario: 'local-logout',
+        packageCommit: 'a' * 40,
+        nonce: 'e' * 64,
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => EvidenceSchema.validateRawResult(
+        '${_rawResult(nonce: 'd' * 64).trimRight().substring(0, _rawResult(nonce: 'd' * 64).trimRight().length - 1)},"extra":true}',
+        scenario: 'local-logout',
+        packageCommit: 'a' * 40,
+        nonce: 'd' * 64,
+      ),
       throwsFormatException,
     );
   });

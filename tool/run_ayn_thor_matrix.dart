@@ -5,6 +5,8 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 
+import 'evidence_schema.dart';
+
 const _package = 'com.mattsp1290.codexauth.ayn_thor_evidence.evidence';
 const _scenarios = <String>{
   'approved-login',
@@ -32,21 +34,6 @@ const _destructive = <String>{
   'expired-without-refresh',
   'malformed-store',
   'local-logout',
-};
-const _categories = <String>{
-  'cancelled',
-  'reauthenticationRequired',
-  'localCleanupRequired',
-  'deviceAuthorizationDeclined',
-  'deviceAuthorizationExpired',
-  'protocolFailure',
-  'redirectRefused',
-  'modelUnavailable',
-  'effortUnavailable',
-  'staleAdmission',
-  'planNotIncluded',
-  'quotaExceeded',
-  'requestFailed',
 };
 
 /// Drives a single app-private finite evidence command without emitting a
@@ -103,7 +90,12 @@ Future<void> _run(
   setStage('finite-result');
   final raw = await runner.waitForResult(const Duration(minutes: 15));
   setStage('validate-result');
-  final result = _validateResult(raw, options, nonce);
+  final result = EvidenceSchema.validateRawResult(
+    raw,
+    scenario: options.scenario,
+    packageCommit: options.packageCommit,
+    nonce: nonce,
+  );
   stdout.writeln(
     jsonEncode(<String, Object?>{
       'device': 'ayn-thor',
@@ -289,69 +281,6 @@ String _resolveAdb() {
     }
   }
   return 'adb';
-}
-
-Map<String, Object?> _validateResult(
-  String source,
-  _Options options,
-  String nonce,
-) {
-  final value = jsonDecode(source);
-  if (value is! Map<String, Object?> ||
-      !value.keys.toSet().containsAll(<String>{
-        'schemaVersion',
-        'scenario',
-        'packageCommit',
-        'flavor',
-        'nonce',
-        'state',
-        'recovery',
-        'protectedIo',
-      }) ||
-      value.keys.any(
-        (key) => !<String>{
-          'schemaVersion',
-          'scenario',
-          'packageCommit',
-          'flavor',
-          'nonce',
-          'state',
-          'recovery',
-          'protectedIo',
-          'category',
-        }.contains(key),
-      ) ||
-      value['schemaVersion'] != 1 ||
-      value['scenario'] != options.scenario ||
-      value['packageCommit'] != options.packageCommit ||
-      value['flavor'] != 'evidence' ||
-      value['nonce'] is! String ||
-      !_constantTime(value['nonce']! as String, nonce) ||
-      value['state'] is! String ||
-      !<String>{
-        'pass',
-        'fail',
-        'blocked',
-        'not-safely-inducible',
-      }.contains(value['state']) ||
-      value['recovery'] is! String ||
-      !RegExp(r'^[a-z-]{1,64}$').hasMatch(value['recovery']! as String) ||
-      value['protectedIo'] is! int ||
-      (value['protectedIo']! as int) < 0 ||
-      (value['category'] != null &&
-          (!_categories.contains(value['category'])))) {
-    throw const FormatException('invalid finite evidence result');
-  }
-  return value;
-}
-
-bool _constantTime(String first, String second) {
-  if (first.length != second.length) return false;
-  var difference = 0;
-  for (var index = 0; index < first.length; index++) {
-    difference |= first.codeUnitAt(index) ^ second.codeUnitAt(index);
-  }
-  return difference == 0;
 }
 
 String _nonce() => List<int>.generate(

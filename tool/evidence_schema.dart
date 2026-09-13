@@ -19,6 +19,21 @@ final class EvidenceSchema {
     'gpt-5.6-terra',
     'gpt-5.6-luna',
   };
+  static const _errorCategories = <String>{
+    'cancelled',
+    'reauthenticationRequired',
+    'localCleanupRequired',
+    'deviceAuthorizationDeclined',
+    'deviceAuthorizationExpired',
+    'protocolFailure',
+    'redirectRefused',
+    'modelUnavailable',
+    'effortUnavailable',
+    'staleAdmission',
+    'planNotIncluded',
+    'quotaExceeded',
+    'requestFailed',
+  };
   static const rowIds = <String>{
     'apk-device-provenance',
     'approved-login',
@@ -39,6 +54,46 @@ final class EvidenceSchema {
 
   static Map<String, Object?> parseRenderable(String source) =>
       validateRenderable(_object(jsonDecode(source)));
+
+  /// Validates a nonce-bearing app-private result before its nonce is removed.
+  static Map<String, Object?> validateRawResult(
+    String source, {
+    required String scenario,
+    required String packageCommit,
+    required String nonce,
+  }) {
+    final value = _object(jsonDecode(source));
+    const required = <String>{
+      'schemaVersion',
+      'scenario',
+      'packageCommit',
+      'flavor',
+      'nonce',
+      'state',
+      'recovery',
+      'protectedIo',
+    };
+    const allowed = <String>{...required, 'category'};
+    if (!value.keys.toSet().containsAll(required) ||
+        value.keys.any((key) => !allowed.contains(key)) ||
+        value['schemaVersion'] != schemaVersion ||
+        value['scenario'] != scenario ||
+        value['packageCommit'] != packageCommit ||
+        value['flavor'] != 'evidence' ||
+        value['nonce'] is! String ||
+        !_constantTime(value['nonce']! as String, nonce) ||
+        value['state'] is! String ||
+        !states.contains(value['state']) ||
+        value['recovery'] is! String ||
+        !RegExp(r'^[a-z-]{1,64}$').hasMatch(value['recovery']! as String) ||
+        value['protectedIo'] is! int ||
+        (value['protectedIo']! as int) < 0 ||
+        (value['category'] != null &&
+            !_errorCategories.contains(value['category']))) {
+      _fail();
+    }
+    return value;
+  }
 
   static Map<String, Object?> validateRenderable(Map<String, Object?> value) {
     _exactKeys(value, <String>{
@@ -343,6 +398,15 @@ final class EvidenceSchema {
         value.contains('  ')) {
       _fail();
     }
+  }
+
+  static bool _constantTime(String first, String second) {
+    if (first.length != second.length) return false;
+    var difference = 0;
+    for (var index = 0; index < first.length; index++) {
+      difference |= first.codeUnitAt(index) ^ second.codeUnitAt(index);
+    }
+    return difference == 0;
   }
 
   static Never _fail() =>
