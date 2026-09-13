@@ -322,7 +322,13 @@ final class _Adb {
 
   Future<void> launch() async {
     await _run(<String>['shell', 'am', 'force-stop', _package]);
-    await _run(<String>['shell', 'monkey', '-p', _package, '1']);
+    await _run(<String>[
+      'shell',
+      'am',
+      'start',
+      '-n',
+      '$_package/.EvidenceActivity',
+    ]);
   }
 
   Future<String> waitForResult(Duration timeout) async {
