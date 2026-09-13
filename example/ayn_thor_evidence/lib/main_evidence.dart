@@ -68,24 +68,35 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     );
   }
 
-  Future<void> _completeApprovedLogin(
+  Future<void> _completeDeviceLoginOutcome(
     EvidenceCommand command,
     EvidenceEvent event,
     AuthStatus status,
-  ) => _stateStore.writeResult(
-    EvidenceResult(
-      command: command,
-      state:
-          event.state == EvidenceState.passed && status == AuthStatus.signedIn
-          ? EvidenceResultState.pass
-          : EvidenceResultState.fail,
-      recovery: status == AuthStatus.signedIn
-          ? EvidenceRecovery.signedIn
-          : EvidenceRecovery.reauthenticationRequired,
-      protectedIo: 0,
-      category: event.category?.name,
-    ),
-  );
+  ) {
+    final passed = switch (command.scenario) {
+      EvidenceScenario.approvedLogin =>
+        event.state == EvidenceState.passed && status == AuthStatus.signedIn,
+      EvidenceScenario.cancelLogin => event.state == EvidenceState.cancelled,
+      EvidenceScenario.declinedLogin =>
+        event.category == CodexAuthErrorCategory.deviceAuthorizationDeclined,
+      EvidenceScenario.expiredLogin =>
+        event.category == CodexAuthErrorCategory.deviceAuthorizationExpired,
+      _ => false,
+    };
+    return _stateStore.writeResult(
+      EvidenceResult(
+        command: command,
+        state: passed ? EvidenceResultState.pass : EvidenceResultState.fail,
+        recovery: status == AuthStatus.signedIn
+            ? EvidenceRecovery.signedIn
+            : EvidenceRecovery.signedOut,
+        protectedIo: 0,
+        category: event.state == EvidenceState.cancelled
+            ? CodexAuthErrorCategory.cancelled.name
+            : event.category?.name,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -100,11 +111,17 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         home: Scaffold(body: Center(child: Text('Awaiting evidence command'))),
       );
     }
-    if (command.scenario == EvidenceScenario.approvedLogin) {
+    if (switch (command.scenario) {
+      EvidenceScenario.approvedLogin ||
+      EvidenceScenario.cancelLogin ||
+      EvidenceScenario.declinedLogin ||
+      EvidenceScenario.expiredLogin => true,
+      _ => false,
+    }) {
       return EvidenceHostApp(
         autoStartDeviceLogin: true,
         onDeviceLoginFinished: (event, status) =>
-            _completeApprovedLogin(command, event, status),
+            _completeDeviceLoginOutcome(command, event, status),
       );
     }
     return MaterialApp(home: _EvidenceLanding(command: command));
