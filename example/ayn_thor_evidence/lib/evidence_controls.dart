@@ -115,16 +115,24 @@ final class EvidenceResult {
     required this.recovery,
     required this.protectedIo,
     this.category,
+    this.predicates = const <String, Object?>{},
   }) : assert(protectedIo >= 0);
   final EvidenceCommand command;
   final EvidenceResultState state;
   final EvidenceRecovery recovery;
   final int protectedIo;
   final String? category;
+  final Map<String, Object?> predicates;
 
   String encode() {
     if (protectedIo < 0 ||
-        (category != null && !_errorCategories.contains(category))) {
+        (category != null && !_errorCategories.contains(category)) ||
+        predicates.length > 32 ||
+        predicates.entries.any(
+          (entry) =>
+              !RegExp(r'^[A-Za-z][A-Za-z0-9]{0,63}$').hasMatch(entry.key) ||
+              (entry.value is! bool && entry.value is! int),
+        )) {
       throw StateError('invalid finite evidence result');
     }
     return jsonEncode(<String, Object?>{
@@ -138,6 +146,7 @@ final class EvidenceResult {
           : state.name,
       'recovery': recovery.wireName,
       'protectedIo': protectedIo,
+      'predicates': predicates,
       if (category != null) 'category': category,
     });
   }

@@ -64,7 +64,7 @@ Map<String, Object?> _record() => <String, Object?>{
 
 String _rawResult({required String nonce}) =>
     '''
-{"schemaVersion":1,"scenario":"local-logout","packageCommit":"${'a' * 40}","flavor":"evidence","nonce":"$nonce","state":"pass","recovery":"signed-out","protectedIo":0}
+{"schemaVersion":1,"scenario":"local-logout","packageCommit":"${'a' * 40}","flavor":"evidence","nonce":"$nonce","state":"pass","recovery":"signed-out","protectedIo":0,"predicates":{}}
 ''';
 
 void main() {

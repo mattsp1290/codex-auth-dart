@@ -31,16 +31,18 @@ void main() {
     );
   });
 
-  test('result is finite and retains only command correlation', () {
+  test('result is finite and retains only bounded predicates', () {
     final command = EvidenceCommand.decode(_command(<String, Object?>{}));
     final result = EvidenceResult(
       command: command,
       state: EvidenceResultState.blocked,
       recovery: EvidenceRecovery.signedOut,
       protectedIo: 0,
+      predicates: const <String, Object?>{'clearAcknowledged': true},
     );
     final value = jsonDecode(result.encode()) as Map<String, Object?>;
     expect(value['nonce'], command.nonce);
+    expect(value['predicates'], <String, Object?>{'clearAcknowledged': true});
     expect(value.containsKey('message'), isFalse);
   });
 }

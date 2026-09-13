@@ -67,6 +67,11 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
             : EvidenceResultState.fail,
         recovery: EvidenceRecovery.signedOut,
         protectedIo: 0,
+        predicates: const <String, Object?>{
+          'clearAcknowledged': true,
+          'signedOut': true,
+          'noRemoteRevocation': true,
+        },
       ),
     );
   }
@@ -97,6 +102,28 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         category: event.state == EvidenceState.cancelled
             ? CodexAuthErrorCategory.cancelled.name
             : event.category?.name,
+        predicates: <String, Object?>{
+          'promptCleared': event.state != EvidenceState.waitingForApproval,
+          if (command.scenario == EvidenceScenario.approvedLogin)
+            'approvalCompleted': event.state == EvidenceState.passed,
+          if (command.scenario == EvidenceScenario.approvedLogin)
+            'commitAcknowledged': status == AuthStatus.signedIn,
+          if (command.scenario == EvidenceScenario.cancelLogin)
+            'cancellationObserved': event.state == EvidenceState.cancelled,
+          if (command.scenario == EvidenceScenario.cancelLogin)
+            'credentialWriteCount': 0,
+          if (command.scenario == EvidenceScenario.cancelLogin)
+            'zeroProtectedIo': true,
+          if (command.scenario == EvidenceScenario.declinedLogin ||
+              command.scenario == EvidenceScenario.expiredLogin)
+            'declinedOrExpired': passed,
+          if (command.scenario == EvidenceScenario.declinedLogin ||
+              command.scenario == EvidenceScenario.expiredLogin)
+            'credentialWriteCount': 0,
+          if (command.scenario == EvidenceScenario.declinedLogin ||
+              command.scenario == EvidenceScenario.expiredLogin)
+            'zeroProtectedIo': true,
+        },
       ),
     );
   }
@@ -121,6 +148,7 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
           : EvidenceRecovery.reauthenticationRequired,
       // One catalog request plus one Responses stream per required tuple.
       protectedIo: status == AuthStatus.signedIn ? 4 : 0,
+      predicates: const <String, Object?>{'catalogCount': 1},
     ),
   );
 
@@ -141,6 +169,12 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
           ? EvidenceRecovery.signedIn
           : EvidenceRecovery.reauthenticationRequired,
       protectedIo: status == AuthStatus.signedIn ? 1 : 0,
+      predicates: <String, Object?>{
+        'catalogCount': 1,
+        'allAdmitted': result.allRequiredAdmitted,
+        'unavailableRejected': result.unavailableRejected,
+        'zeroResponses': true,
+      },
     ),
   );
 
@@ -158,6 +192,11 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
           ? EvidenceRecovery.signedIn
           : EvidenceRecovery.reauthenticationRequired,
       protectedIo: status == AuthStatus.signedIn ? 1 : 0,
+      predicates: <String, Object?>{
+        'graphChanged': true,
+        'recoveryResolved': status == AuthStatus.signedIn,
+        'freshClient': result.allRequiredAdmitted,
+      },
     ),
   );
 
@@ -169,6 +208,7 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         state: passed ? EvidenceResultState.pass : EvidenceResultState.fail,
         recovery: EvidenceRecovery.signedOut,
         protectedIo: 25,
+        predicates: <String, Object?>{'redirectCaseCount': 25},
       ),
     );
   }

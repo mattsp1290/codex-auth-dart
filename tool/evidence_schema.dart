@@ -72,6 +72,7 @@ final class EvidenceSchema {
       'state',
       'recovery',
       'protectedIo',
+      'predicates',
     };
     const allowed = <String>{...required, 'category'};
     if (!value.keys.toSet().containsAll(required) ||
@@ -88,6 +89,7 @@ final class EvidenceSchema {
         !RegExp(r'^[a-z-]{1,64}$').hasMatch(value['recovery']! as String) ||
         value['protectedIo'] is! int ||
         (value['protectedIo']! as int) < 0 ||
+        !_rawPredicates(value['predicates']) ||
         (value['category'] != null &&
             !_errorCategories.contains(value['category']))) {
       _fail();
@@ -141,6 +143,16 @@ final class EvidenceSchema {
         _finiteLabel(entry.value);
       }
     }
+  }
+
+  static bool _rawPredicates(Object? value) {
+    if (value is! Map || value.length > 32) return false;
+    return value.entries.every(
+      (entry) =>
+          entry.key is String &&
+          RegExp(r'^[A-Za-z][A-Za-z0-9]{0,63}$').hasMatch(entry.key as String) &&
+          (entry.value is bool || entry.value is int),
+    );
   }
 
   static void _rows(List<Object?> rows) {
