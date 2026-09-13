@@ -96,7 +96,7 @@ Future<void> _run(
     setStage('launch');
     await runner.launch();
     setStage('finite-result');
-    final raw = await runner.waitForResult(const Duration(minutes: 15));
+    final raw = await runner.waitForResult(options.resultTimeout);
     setStage('command-consumption');
     if (!await runner.commandWasConsumed()) {
       throw StateError('evidence command was not consumed');
@@ -142,17 +142,20 @@ final class _Options {
     this.apk,
     this.scenario,
     this.confirmDestructive,
+    this.resultTimeout,
   );
   final String packageCommit;
   final String apk;
   final String scenario;
   final bool confirmDestructive;
+  final Duration resultTimeout;
 
   static _Options parse(List<String> arguments) {
     String? commit;
     String? apk;
     String? scenario;
     var confirmed = false;
+    var resultTimeout = const Duration(minutes: 15);
     for (var index = 0; index < arguments.length; index++) {
       switch (arguments[index]) {
         case '--package-commit':
@@ -163,6 +166,12 @@ final class _Options {
           scenario = arguments[++index];
         case '--confirm-destructive':
           confirmed = true;
+        case '--result-timeout-seconds':
+          final seconds = int.tryParse(arguments[++index]);
+          if (seconds == null || seconds < 1 || seconds > 900) {
+            throw ArgumentError('invalid matrix runner timeout');
+          }
+          resultTimeout = Duration(seconds: seconds);
         default:
           throw ArgumentError('invalid matrix runner argument');
       }
@@ -174,7 +183,7 @@ final class _Options {
         !_scenarios.contains(scenario)) {
       throw ArgumentError('invalid matrix runner configuration');
     }
-    return _Options(commit, apk, scenario, confirmed);
+    return _Options(commit, apk, scenario, confirmed, resultTimeout);
   }
 }
 
