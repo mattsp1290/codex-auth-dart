@@ -289,24 +289,7 @@ final class _Adb {
           'files/evidence-result.json',
           'files/evidence-result.json.tmp',
         ]);
-        final files = await _run(<String>[
-          'shell',
-          'run-as',
-          _package,
-          'ls',
-          'files',
-        ]);
-        if (!files
-            .split(RegExp(r'\s+'))
-            .any(
-              <String>{
-                'evidence-command.json',
-                'evidence-result.json',
-                'evidence-result.json.tmp',
-              }.contains,
-            )) {
-          return;
-        }
+        return;
       } on Object {
         // The next bounded attempt decides whether app-private cleanup settled.
       }
