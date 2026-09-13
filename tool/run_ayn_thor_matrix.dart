@@ -132,6 +132,7 @@ Future<void> _run(
     try {
       setStage('cleanup-stop');
       await runner.stop();
+      await Future<void>.delayed(const Duration(seconds: 2));
       setStage('cleanup-clear');
       await runner.clearTransientState();
       if (redirect != null) {
