@@ -260,9 +260,8 @@ final class _Adb {
       'exec-out',
       'run-as',
       _package,
-      'sh',
-      '-c',
-      'cat > files/evidence-command.json',
+      'tee',
+      'files/evidence-command.json',
     ]);
     process.stdin.write(command);
     await process.stdin.close();
