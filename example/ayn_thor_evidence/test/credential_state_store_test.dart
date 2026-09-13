@@ -55,4 +55,23 @@ void main() {
     expect(driver.value, isNull);
     expect(driver.clears, 1);
   });
+
+  test('refresh resolution is conditional on the marked generation', () async {
+    final driver = _Driver();
+    final store = CredentialStateStore(driver: driver);
+    await store.transaction((transaction) async {
+      await transaction.replace('synthetic-record');
+      await transaction.markRefreshRisk('generation-0123456789');
+      await expectLater(
+        transaction.replaceAfterRefresh('different-generation', 'replacement'),
+        throwsA(isA<CredentialStoreException>()),
+      );
+      await expectLater(
+        transaction.clearAfterRefresh('different-generation'),
+        throwsA(isA<CredentialStoreException>()),
+      );
+      await transaction.restoreAfterNotDispatched('generation-0123456789');
+      expect(await transaction.read(), 'synthetic-record');
+    });
+  });
 }

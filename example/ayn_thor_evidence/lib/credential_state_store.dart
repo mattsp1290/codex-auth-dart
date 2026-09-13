@@ -108,8 +108,12 @@ final class _StateTransaction implements CredentialTransaction {
   @override
   Future<void> clear() => _store._clearFailClosed();
   @override
-  Future<void> clearAfterRefresh(String generation) =>
-      _store._commit(_Envelope.signedOut);
+  Future<void> clearAfterRefresh(String generation) async {
+    final envelope = await _matchingRisk(generation);
+    if (envelope == null) throw const CredentialStoreException();
+    await _store._commit(_Envelope.signedOut);
+  }
+
   @override
   Future<void> markRefreshRisk(String generation) async {
     final envelope = await _store._readEnvelope();
@@ -129,17 +133,26 @@ final class _StateTransaction implements CredentialTransaction {
   @override
   Future<void> replace(String record) => _store._commit(_Envelope.idle(record));
   @override
-  Future<void> replaceAfterRefresh(String generation, String record) =>
-      _store._commit(_Envelope.idle(record));
+  Future<void> replaceAfterRefresh(String generation, String record) async {
+    final envelope = await _matchingRisk(generation);
+    if (envelope == null) throw const CredentialStoreException();
+    await _store._commit(_Envelope.idle(record));
+  }
+
   @override
   Future<void> restoreAfterNotDispatched(String generation) async {
+    final envelope = await _matchingRisk(generation);
+    if (envelope == null) throw const CredentialStoreException();
+    await _store._commit(_Envelope.idle(envelope.record!));
+  }
+
+  Future<_Envelope?> _matchingRisk(String generation) async {
     final envelope = await _store._readEnvelope();
-    if (envelope?.state != _EnvelopeState.refreshRisk ||
-        envelope?.generation != generation ||
-        envelope?.record == null) {
-      throw const CredentialStoreException();
-    }
-    await _store._commit(_Envelope.idle(envelope!.record!));
+    return envelope?.state == _EnvelopeState.refreshRisk &&
+            envelope?.generation == generation &&
+            envelope?.record != null
+        ? envelope
+        : null;
   }
 }
 
