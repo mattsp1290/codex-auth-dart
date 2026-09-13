@@ -42,7 +42,10 @@ const _destructive = <String>{
 Future<void> main(List<String> arguments) async {
   var stage = 'arguments';
   try {
-    await _run(arguments, (value) => stage = value);
+    await _run(arguments, (value) {
+      stage = value;
+      stderr.writeln('matrix runner stage $value');
+    });
   } on Object {
     // A closed stage label makes host/device failures diagnosable without
     // exposing command lines, local paths, serials, nonces, or raw records.
