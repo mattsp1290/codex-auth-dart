@@ -164,7 +164,22 @@ final class _Adb {
     if (emulator.trim() == '1') {
       throw StateError('emulators are not evidence devices');
     }
+    final manufacturer = await _property('ro.product.manufacturer');
+    final model = await _property('ro.product.model');
+    final release = await _property('ro.build.version.release');
+    final buildId = await _property('ro.build.id');
+    final fingerprint = await _property('ro.build.fingerprint');
+    if (manufacturer.toLowerCase() != 'ayn' ||
+        model.toLowerCase() != 'thor' ||
+        release.isEmpty ||
+        buildId.isEmpty ||
+        fingerprint.isEmpty) {
+      throw StateError('selected device does not match AYN Thor provenance');
+    }
   }
+
+  Future<String> _property(String name) async =>
+      (await _run(<String>['shell', 'getprop', name])).trim();
 
   Future<void> install(String apk) async {
     if (!await File(apk).exists()) {
