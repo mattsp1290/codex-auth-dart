@@ -190,12 +190,20 @@ final class _Adb {
     final buildId = await _property('ro.build.id');
     final fingerprint = await _property('ro.build.fingerprint');
     if (manufacturer.toLowerCase() != 'ayn' ||
-        model.toLowerCase() != 'thor' ||
+        !_isAynThorModel(model) ||
         release.isEmpty ||
         buildId.isEmpty ||
         fingerprint.isEmpty) {
       throw StateError('selected device does not match AYN Thor provenance');
     }
+  }
+
+  bool _isAynThorModel(String model) {
+    final normalized = model.trim().toLowerCase().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+    return normalized == 'thor' || normalized == 'ayn thor';
   }
 
   Future<String> _property(String name) async =>
