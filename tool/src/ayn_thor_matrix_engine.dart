@@ -32,10 +32,15 @@ enum CleanupStage {
 }
 
 final class MatrixRunFailure implements Exception {
-  const MatrixRunFailure({required this.primaryStage, this.cleanupStage});
+  const MatrixRunFailure({
+    required this.primaryStage,
+    this.cleanupStage,
+    this.validationRejection,
+  });
 
   final MatrixStage? primaryStage;
   final CleanupStage? cleanupStage;
+  final RawEvidenceRejection? validationRejection;
 
   String get rejectionLabel =>
       primaryStage?.label ?? cleanupStage?.label ?? MatrixStage.arguments.label;
@@ -115,6 +120,7 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
 
   Object? primaryError;
   MatrixStage? primaryStage;
+  RawEvidenceRejection? validationRejection;
   String? safeJson;
   var transientMayExist = false;
   var appMayRun = false;
@@ -154,6 +160,15 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
       throw StateError('evidence command was not consumed');
     }
     progress(MatrixStage.validateResult);
+    validationRejection = EvidenceSchema.diagnoseRawResult(
+      raw,
+      scenario: request.scenario,
+      packageCommit: request.packageCommit,
+      nonce: request.nonce,
+    );
+    if (validationRejection != null) {
+      throw StateError('finite evidence result is invalid');
+    }
     final result = EvidenceSchema.validateRawResult(
       raw,
       scenario: request.scenario,
@@ -216,6 +231,7 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
     throw MatrixRunFailure(
       primaryStage: primaryStage,
       cleanupStage: cleanupStage,
+      validationRejection: validationRejection,
     );
   }
   return MatrixRunSuccess(safeJson!);

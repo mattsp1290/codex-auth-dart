@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 
+import 'src/ayn_thor_matrix_adapter.dart';
 import 'src/ayn_thor_matrix_engine.dart';
 import 'src/bounded_process_executor.dart';
 
@@ -88,6 +89,12 @@ Future<int> runMatrixCli(
     return 0;
   } on MatrixRunFailure catch (failure) {
     err.writeln('matrix runner rejected at ${failure.rejectionLabel}');
+    if (failure.validationRejection != null) {
+      err.writeln(
+        'matrix runner validation rejected at '
+        '${failure.validationRejection!.label}',
+      );
+    }
     if (failure.primaryStage != null && failure.cleanupStage != null) {
       err.writeln(
         'matrix runner cleanup incomplete at ${failure.cleanupStage!.label}',
@@ -341,10 +348,12 @@ final class _Adb implements AynThorMatrixAdapter {
         'exec-out',
         'run-as',
         _package,
-        'cat',
-        'files/evidence-result.json',
+        'sh',
+        '-c',
+        'test -s files/evidence-result.json && '
+            'cat files/evidence-result.json',
       ], timeout: _commandTimeout);
-      if (result.succeeded && result.stdoutText.isNotEmpty) {
+      if (result.succeeded && isFiniteResultCandidate(result.stdoutText)) {
         return result.stdoutText;
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));

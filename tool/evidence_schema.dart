@@ -1,5 +1,29 @@
 import 'dart:convert';
 
+enum RawEvidenceRejection {
+  jsonEmpty('validation-json-empty'),
+  jsonEncoding('validation-json-encoding'),
+  jsonPrefix('validation-json-prefix'),
+  jsonSuffix('validation-json-suffix'),
+  jsonBoundary('validation-json-boundary'),
+  jsonSyntax('validation-json-syntax'),
+  shape('validation-shape'),
+  keys('validation-keys'),
+  schemaVersion('validation-version'),
+  scenario('validation-scenario'),
+  packageCommit('validation-commit'),
+  flavor('validation-flavor'),
+  nonce('validation-nonce'),
+  state('validation-state'),
+  recovery('validation-recovery'),
+  protectedIo('validation-protected-io'),
+  predicates('validation-predicates'),
+  category('validation-category');
+
+  const RawEvidenceRejection(this.label);
+  final String label;
+}
+
 /// Closed validation for the nonce-free, repository-renderable evidence record.
 final class EvidenceSchema {
   static const schemaVersion = 1;
@@ -62,7 +86,47 @@ final class EvidenceSchema {
     required String packageCommit,
     required String nonce,
   }) {
-    final value = _object(jsonDecode(source));
+    final rejection = diagnoseRawResult(
+      source,
+      scenario: scenario,
+      packageCommit: packageCommit,
+      nonce: nonce,
+    );
+    if (rejection != null) _fail();
+    return _object(jsonDecode(source));
+  }
+
+  static RawEvidenceRejection? diagnoseRawResult(
+    String source, {
+    required String scenario,
+    required String packageCommit,
+    required String nonce,
+  }) {
+    final trimmed = source.trim();
+    if (trimmed.isEmpty) return RawEvidenceRejection.jsonEmpty;
+    if (trimmed.contains('\uFFFD')) return RawEvidenceRejection.jsonEncoding;
+    if (!trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      return RawEvidenceRejection.jsonPrefix;
+    }
+    if (trimmed.startsWith('{') && !trimmed.endsWith('}')) {
+      return RawEvidenceRejection.jsonSuffix;
+    }
+    if (!trimmed.startsWith('{') && !trimmed.endsWith('}')) {
+      return RawEvidenceRejection.jsonBoundary;
+    }
+    Object? decoded;
+    try {
+      decoded = jsonDecode(trimmed);
+    } on FormatException {
+      return RawEvidenceRejection.jsonSyntax;
+    }
+    if (decoded is! Map) return RawEvidenceRejection.shape;
+    Map<String, Object?> value;
+    try {
+      value = Map<String, Object?>.from(decoded);
+    } on Object {
+      return RawEvidenceRejection.shape;
+    }
     const required = <String>{
       'schemaVersion',
       'scenario',
@@ -76,25 +140,39 @@ final class EvidenceSchema {
     };
     const allowed = <String>{...required, 'category'};
     if (!value.keys.toSet().containsAll(required) ||
-        value.keys.any((key) => !allowed.contains(key)) ||
-        value['schemaVersion'] != schemaVersion ||
-        value['scenario'] != scenario ||
-        value['packageCommit'] != packageCommit ||
-        value['flavor'] != 'evidence' ||
-        value['nonce'] is! String ||
-        !_constantTime(value['nonce']! as String, nonce) ||
-        value['state'] is! String ||
-        !states.contains(value['state']) ||
-        value['recovery'] is! String ||
-        !RegExp(r'^[a-z-]{1,64}$').hasMatch(value['recovery']! as String) ||
-        value['protectedIo'] is! int ||
-        (value['protectedIo']! as int) < 0 ||
-        !_rawPredicates(value['predicates']) ||
-        (value['category'] != null &&
-            !_errorCategories.contains(value['category']))) {
-      _fail();
+        value.keys.any((key) => !allowed.contains(key))) {
+      return RawEvidenceRejection.keys;
     }
-    return value;
+    if (value['schemaVersion'] != schemaVersion) {
+      return RawEvidenceRejection.schemaVersion;
+    }
+    if (value['scenario'] != scenario) return RawEvidenceRejection.scenario;
+    if (value['packageCommit'] != packageCommit) {
+      return RawEvidenceRejection.packageCommit;
+    }
+    if (value['flavor'] != 'evidence') return RawEvidenceRejection.flavor;
+    if (value['nonce'] is! String ||
+        !_constantTime(value['nonce']! as String, nonce)) {
+      return RawEvidenceRejection.nonce;
+    }
+    if (value['state'] is! String || !states.contains(value['state'])) {
+      return RawEvidenceRejection.state;
+    }
+    if (value['recovery'] is! String ||
+        !RegExp(r'^[a-z-]{1,64}$').hasMatch(value['recovery']! as String)) {
+      return RawEvidenceRejection.recovery;
+    }
+    if (value['protectedIo'] is! int || (value['protectedIo']! as int) < 0) {
+      return RawEvidenceRejection.protectedIo;
+    }
+    if (!_rawPredicates(value['predicates'])) {
+      return RawEvidenceRejection.predicates;
+    }
+    if (value['category'] != null &&
+        !_errorCategories.contains(value['category'])) {
+      return RawEvidenceRejection.category;
+    }
+    return null;
   }
 
   static Map<String, Object?> validateRenderable(Map<String, Object?> value) {

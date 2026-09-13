@@ -172,4 +172,16 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('raw result diagnostics expose only closed mismatch classes', () {
+    expect(
+      EvidenceSchema.diagnoseRawResult(
+        _rawResult(nonce: 'd' * 64),
+        scenario: 'local-logout',
+        packageCommit: 'a' * 40,
+        nonce: 'e' * 64,
+      ),
+      RawEvidenceRejection.nonce,
+    );
+  });
 }
