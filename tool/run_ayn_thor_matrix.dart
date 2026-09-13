@@ -52,32 +52,41 @@ const _categories = <String>{
 /// Drives a single app-private finite evidence command without emitting a
 /// serial, PID, app-private path, nonce, or raw result.
 Future<void> main(List<String> arguments) async {
+  var stage = 'arguments';
   try {
-    await _run(arguments);
+    await _run(arguments, (value) => stage = value);
   } on Object {
-    // Deliberately do not expose command lines, local paths, serials, or raw
-    // app-private records through host runner diagnostics.
-    stderr.writeln('matrix runner rejected the requested evidence operation');
+    // A closed stage label makes host/device failures diagnosable without
+    // exposing command lines, local paths, serials, nonces, or raw records.
+    stderr.writeln('matrix runner rejected at $stage');
     exitCode = 1;
   }
 }
 
-Future<void> _run(List<String> arguments) async {
+Future<void> _run(
+  List<String> arguments,
+  void Function(String stage) setStage,
+) async {
   final options = _Options.parse(arguments);
+  setStage('device-selection');
   final serial = Platform.environment['ANDROID_SERIAL'];
   if (serial == null || serial.isEmpty) {
     throw StateError('one authorized Android device must be selected');
   }
   final runner = _Adb(serial);
+  setStage('physical-device');
   await runner.requirePhysicalDevice();
   if (_destructive.contains(options.scenario) && !options.confirmDestructive) {
     throw StateError('destructive scenario requires explicit confirmation');
   }
   final expectedDigest = await _sha256(File(options.apk));
+  setStage('install');
   await runner.install(options.apk);
+  setStage('installed-digest');
   if (!await runner.installedDigestMatches(expectedDigest)) {
     throw StateError('installed APK does not match candidate');
   }
+  setStage('clear-previous-result');
   await runner.clearPreviousResult();
   final nonce = _nonce();
   final command = jsonEncode(<String, Object?>{
@@ -87,9 +96,13 @@ Future<void> _run(List<String> arguments) async {
     'flavor': 'evidence',
     'nonce': nonce,
   });
+  setStage('write-command');
   await runner.writeCommand(command);
+  setStage('launch');
   await runner.launch();
+  setStage('finite-result');
   final raw = await runner.waitForResult(const Duration(minutes: 15));
+  setStage('validate-result');
   final result = _validateResult(raw, options, nonce);
   stdout.writeln(
     jsonEncode(<String, Object?>{
