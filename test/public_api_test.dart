@@ -8,19 +8,31 @@ final class _Store implements CredentialStore {
   String? value;
   @override
   Future<T> transaction<T>(
-    Future<T> Function(CredentialTransaction transaction) action,
-  ) => action(_Transaction(this));
+    Future<T> Function(CredentialTransaction transaction) action, {
+    CancellationSignal? cancellation,
+  }) => action(_Transaction(this));
 }
 
 final class _Transaction implements CredentialTransaction {
   _Transaction(this.store);
   final _Store store;
   @override
+  bool get requiresReauthentication => false;
+  @override
   Future<void> clear() async => store.value = null;
+  @override
+  Future<void> clearAfterRefresh(String generation) => clear();
+  @override
+  Future<void> markRefreshRisk(String generation) async {}
   @override
   Future<String?> read() async => store.value;
   @override
   Future<void> replace(String record) async => store.value = record;
+  @override
+  Future<void> replaceAfterRefresh(String generation, String record) =>
+      replace(record);
+  @override
+  Future<void> restoreAfterNotDispatched(String generation) async {}
 }
 
 final class _ScriptedTransport implements HttpTransport {

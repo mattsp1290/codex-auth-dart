@@ -22,12 +22,16 @@ final class CodexAuthException implements Exception {
     required this.operation,
     this.canRetry = false,
     this.requiresReauthentication = false,
+    this.cleanupRequired = false,
   });
 
   final CodexAuthErrorCategory category;
   final String operation;
   final bool canRetry;
   final bool requiresReauthentication;
+
+  /// Local state could not be safely cleared; protected I/O is forbidden.
+  final bool cleanupRequired;
 
   @override
   String toString() => 'CodexAuthException(${category.name}, $operation)';

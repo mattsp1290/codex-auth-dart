@@ -10,8 +10,9 @@ final class _SerialStore implements CredentialStore {
 
   @override
   Future<T> transaction<T>(
-    Future<T> Function(CredentialTransaction transaction) action,
-  ) async {
+    Future<T> Function(CredentialTransaction transaction) action, {
+    CancellationSignal? cancellation,
+  }) async {
     final previous = _tail;
     final release = Completer<void>();
     _tail = release.future;
@@ -28,11 +29,22 @@ final class _SerialTransaction implements CredentialTransaction {
   const _SerialTransaction(this.store);
   final _SerialStore store;
   @override
+  bool get requiresReauthentication => false;
+  @override
   Future<void> clear() async => store.value = null;
+  @override
+  Future<void> clearAfterRefresh(String generation) => clear();
+  @override
+  Future<void> markRefreshRisk(String generation) async {}
   @override
   Future<String?> read() async => store.value;
   @override
   Future<void> replace(String record) async => store.value = record;
+  @override
+  Future<void> replaceAfterRefresh(String generation, String record) =>
+      replace(record);
+  @override
+  Future<void> restoreAfterNotDispatched(String generation) async {}
 }
 
 final class _Transport implements HttpTransport {

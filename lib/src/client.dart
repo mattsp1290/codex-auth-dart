@@ -74,6 +74,9 @@ final class CodexAuthClient {
     throwIfCancelled(signal);
     return _store.transaction((transaction) async {
       throwIfCancelled(signal);
+      if (transaction.requiresReauthentication) {
+        return AuthStatus.reauthenticationRequired;
+      }
       final raw = await transaction.read();
       if (raw == null) return AuthStatus.signedOut;
       if (decodeCredentials(raw) == null) {
@@ -81,7 +84,7 @@ final class CodexAuthClient {
         return AuthStatus.reauthenticationRequired;
       }
       return AuthStatus.signedIn;
-    });
+    }, cancellation: signal);
   }
 
   /// Clears local credentials only; it does not attempt remote revocation.
@@ -91,7 +94,7 @@ final class CodexAuthClient {
     await _store.transaction((transaction) async {
       throwIfCancelled(signal);
       await transaction.clear();
-    });
+    }, cancellation: signal);
   }
 
   /// Performs device-code login and reports success only after a durable write.
@@ -115,7 +118,7 @@ final class CodexAuthClient {
       ),
       cancellation: signal,
     );
-    _rejectRedirect(start, 'deviceLogin');
+    await _rejectRedirect(start, 'deviceLogin');
     final started = await _boundedJson(start, 'deviceLogin');
     final deviceAuthId = started['device_auth_id'];
     final userCode = started['user_code'];
@@ -166,7 +169,7 @@ final class CodexAuthClient {
         ),
         cancellation: signal,
       );
-      _rejectRedirect(poll, 'deviceLogin');
+      await _rejectRedirect(poll, 'deviceLogin');
       if (poll.statusCode == 403 || poll.statusCode == 404) {
         await poll.body.drain<void>();
         continue;
@@ -222,7 +225,7 @@ final class CodexAuthClient {
         ),
         cancellation: signal,
       );
-      _rejectRedirect(response, 'listModels');
+      await _rejectRedirect(response, 'listModels');
       if (response.statusCode == 401 || response.statusCode == 403) {
         await transaction.clear();
         throw const CodexAuthException(
@@ -374,7 +377,7 @@ final class CodexAuthClient {
         ),
         cancellation: signal,
       );
-      _rejectRedirect(response, 'sendResponses');
+      await _rejectRedirect(response, 'sendResponses');
       if (response.statusCode == 401 || response.statusCode == 403) {
         await transaction.clear();
       }
@@ -420,7 +423,7 @@ final class CodexAuthClient {
       }
       throwIfCancelled(signal);
       return action(credentials, transaction);
-    });
+    }, cancellation: signal);
   }
 
   Future<Credentials> _refresh(
@@ -429,6 +432,7 @@ final class CodexAuthClient {
     CancellationSignal? signal,
     String operation,
   ) async {
+    await transaction.markRefreshRisk(old.generation);
     try {
       final response = await _transport.send(
         HttpRequestData(
@@ -446,10 +450,10 @@ final class CodexAuthClient {
         ),
         cancellation: signal,
       );
-      _rejectRedirect(response, operation);
+      await _rejectRedirect(response, operation);
       final payload = await _boundedJson(response, operation);
       if (payload['error'] == 'invalid_grant') {
-        await transaction.clear();
+        await _clearAfterRefresh(transaction, old.generation, operation);
         throw const CodexAuthException(
           CodexAuthErrorCategory.reauthenticationRequired,
           operation: 'refresh',
@@ -461,22 +465,45 @@ final class CodexAuthClient {
         old.generation,
         old.accountId,
         false,
+        fallbackRefreshToken: old.refreshToken,
       );
       if (next == null || response.statusCode != 200) {
-        await transaction.clear();
+        await _clearAfterRefresh(transaction, old.generation, operation);
         throw const CodexAuthException(
           CodexAuthErrorCategory.reauthenticationRequired,
           operation: 'refresh',
           requiresReauthentication: true,
         );
       }
-      await transaction.replace(encodeCredentials(next));
+      await transaction.replaceAfterRefresh(
+        old.generation,
+        encodeCredentials(next),
+      );
       return next;
+    } on HttpTransportException catch (error) {
+      if (error.phase == HttpDispatchPhase.notDispatched) {
+        try {
+          await transaction.restoreAfterNotDispatched(old.generation);
+        } on Object {
+          throw _cleanupRequired(operation);
+        }
+        throw const CodexAuthException(
+          CodexAuthErrorCategory.requestFailed,
+          operation: 'refresh',
+          canRetry: true,
+        );
+      }
+      await _clearAfterRefresh(transaction, old.generation, operation);
+      throw const CodexAuthException(
+        CodexAuthErrorCategory.reauthenticationRequired,
+        operation: 'refresh',
+        requiresReauthentication: true,
+      );
     } on CodexAuthException {
       rethrow;
     } on Object {
       // Refresh dispatch is ambiguous once transport may have started: fail closed.
-      await transaction.clear();
+      await _clearAfterRefresh(transaction, old.generation, operation);
       throw const CodexAuthException(
         CodexAuthErrorCategory.reauthenticationRequired,
         operation: 'refresh',
@@ -508,7 +535,7 @@ final class CodexAuthClient {
       ),
       cancellation: signal,
     );
-    _rejectRedirect(response, 'loginDevice');
+    await _rejectRedirect(response, 'loginDevice');
     final credentials = _credentialsFromTokenPayload(
       await _boundedJson(response, 'loginDevice'),
       newCredentialGeneration(),
@@ -523,6 +550,7 @@ final class CodexAuthClient {
     }
     await _store.transaction(
       (transaction) => transaction.replace(encodeCredentials(credentials)),
+      cancellation: signal,
     );
   }
 
@@ -530,6 +558,13 @@ final class CodexAuthClient {
     CredentialTransaction transaction,
     String operation,
   ) async {
+    if (transaction.requiresReauthentication) {
+      throw CodexAuthException(
+        CodexAuthErrorCategory.reauthenticationRequired,
+        operation: operation,
+        requiresReauthentication: true,
+      );
+    }
     final raw = await transaction.read();
     if (raw == null) return null;
     final credentials = decodeCredentials(raw);
@@ -548,15 +583,16 @@ final class CodexAuthClient {
     Map<String, Object?> payload,
     String generation,
     String? oldAccount,
-    bool requireIdentity,
-  ) {
+    bool requireIdentity, {
+    String? fallbackRefreshToken,
+  }) {
     final access = payload['access_token'];
     final refresh = payload['refresh_token'];
     final expires = payload['expires_in'];
     if (access is! String ||
         access.isEmpty ||
-        refresh is! String ||
-        refresh.isEmpty ||
+        (refresh is! String && fallbackRefreshToken == null) ||
+        (refresh is String && refresh.isEmpty) ||
         (expires is! num && expirationFromAccessToken(access) == null) ||
         (expires is num && expires <= 0)) {
       return null;
@@ -579,7 +615,7 @@ final class CodexAuthClient {
     }
     return Credentials(
       accessToken: access,
-      refreshToken: refresh,
+      refreshToken: refresh is String ? refresh : fallbackRefreshToken!,
       expiresAt: expiresAt,
       generation: generation,
       accountId: account,
@@ -604,8 +640,12 @@ final class CodexAuthClient {
     return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
-  void _rejectRedirect(HttpResponseData response, String operation) {
+  Future<void> _rejectRedirect(
+    HttpResponseData response,
+    String operation,
+  ) async {
     if (response.statusCode >= 300 && response.statusCode < 400) {
+      await response.close?.call();
       throw CodexAuthException(
         CodexAuthErrorCategory.redirectRefused,
         operation: operation,
@@ -617,17 +657,17 @@ final class CodexAuthClient {
     HttpResponseData response,
     String operation,
   ) async {
-    final bytes = <int>[];
-    await for (final chunk in response.body) {
-      bytes.addAll(chunk);
-      if (bytes.length > 1024 * 1024) {
-        throw CodexAuthException(
-          CodexAuthErrorCategory.protocolFailure,
-          operation: operation,
-        );
-      }
-    }
     try {
+      final bytes = <int>[];
+      await for (final chunk in response.body) {
+        bytes.addAll(chunk);
+        if (bytes.length > 1024 * 1024) {
+          throw CodexAuthException(
+            CodexAuthErrorCategory.protocolFailure,
+            operation: operation,
+          );
+        }
+      }
       final value = jsonDecode(utf8.decode(bytes));
       return value is Map<String, Object?> ? value : <String, Object?>{};
     } on Object {
@@ -635,8 +675,29 @@ final class CodexAuthClient {
         CodexAuthErrorCategory.protocolFailure,
         operation: operation,
       );
+    } finally {
+      await response.close?.call();
     }
   }
+
+  Future<void> _clearAfterRefresh(
+    CredentialTransaction transaction,
+    String generation,
+    String operation,
+  ) async {
+    try {
+      await transaction.clearAfterRefresh(generation);
+    } on Object {
+      throw _cleanupRequired(operation);
+    }
+  }
+
+  CodexAuthException _cleanupRequired(String operation) => CodexAuthException(
+    CodexAuthErrorCategory.localCleanupRequired,
+    operation: operation,
+    requiresReauthentication: true,
+    cleanupRequired: true,
+  );
 
   CodexAuthException _safeResponseError(int status, String operation) =>
       CodexAuthException(

@@ -85,6 +85,8 @@ final class EvidenceController {
 
   void cancel() => _cancellation?.cancel();
 
+  Future<AuthStatus> status() => _client.status();
+
   /// Runs the three exact admissions and minimal streams after an explicit UI
   /// action. It stores only finite state, never response text or metadata.
   Future<void> runRequiredModels() async {

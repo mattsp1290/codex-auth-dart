@@ -28,12 +28,19 @@ final class _EvidenceHome extends StatefulWidget {
   State<_EvidenceHome> createState() => _EvidenceHomeState();
 }
 
-final class _EvidenceHomeState extends State<_EvidenceHome> {
-  late final EvidenceController _controller;
+final class _EvidenceHomeState extends State<_EvidenceHome>
+    with WidgetsBindingObserver {
+  late EvidenceController _controller;
+  AuthStatus _durableStatus = AuthStatus.signedOut;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _rebuildGraph();
+  }
+
+  void _rebuildGraph() {
     _controller = EvidenceController(
       CodexAuthClient(
         CodexAuthOptions(
@@ -42,6 +49,21 @@ final class _EvidenceHomeState extends State<_EvidenceHome> {
         ),
       ),
     )..addListener(_changed);
+    unawaited(_readDurableStatus());
+  }
+
+  Future<void> _readDurableStatus() async {
+    final status = await _controller.status();
+    if (mounted) setState(() => _durableStatus = status);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _controller.removeListener(_changed);
+    _controller.cancel();
+    _rebuildGraph();
+    if (mounted) setState(() {});
   }
 
   void _changed() {
@@ -50,6 +72,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_changed);
     _controller.cancel();
     super.dispose();
@@ -65,7 +88,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Text('State: ${_controller.state.name}'),
+            Text('State: ${_controller.state.name} ($_durableStatus)'),
             Text(
               'Build: ${BuildProvenance.packageCommit} (${BuildProvenance.flavor})',
             ),
