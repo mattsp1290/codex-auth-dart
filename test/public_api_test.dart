@@ -70,7 +70,7 @@ void main() {
             'access_token': 'test-access',
             'refresh_token': 'test-refresh',
             'expires_in': 3600,
-            'account_id': 'test-account',
+            'id_token': 'e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoidGVzdC1hY2NvdW50In19.sig',
           },
         },
         <String, Object?>{

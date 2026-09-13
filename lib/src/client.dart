@@ -6,6 +6,7 @@ import 'credential_store.dart';
 import 'credentials.dart';
 import 'errors.dart';
 import 'http_transport.dart';
+import 'jwt_claims.dart';
 import 'protocol.dart';
 
 part 'model_catalog.dart';
@@ -442,6 +443,7 @@ final class CodexAuthClient {
         payload,
         old.generation,
         old.accountId,
+        false,
       );
       if (next == null || response.statusCode != 200) {
         await transaction.clear();
@@ -494,6 +496,7 @@ final class CodexAuthClient {
       await _boundedJson(response, 'loginDevice'),
       newCredentialGeneration(),
       null,
+      true,
     );
     if (credentials == null || response.statusCode != 200) {
       throw const CodexAuthException(
@@ -528,6 +531,7 @@ final class CodexAuthClient {
     Map<String, Object?> payload,
     String generation,
     String? oldAccount,
+    bool requireIdentity,
   ) {
     final access = payload['access_token'];
     final refresh = payload['refresh_token'];
@@ -536,22 +540,30 @@ final class CodexAuthClient {
         access.isEmpty ||
         refresh is! String ||
         refresh.isEmpty ||
-        expires is! num ||
-        expires <= 0) {
+        (expires is! num && expirationFromAccessToken(access) == null) ||
+        (expires is num && expires <= 0)) {
       return null;
     }
-    final account = payload['account_id'];
-    // The pinned MVP wire contract must provide an account header identity on
-    // both exchange and refresh. Accepting an omitted identity would turn a
-    // token response into an unprovable cross-account continuity claim.
-    if (account is! String || account.isEmpty) return null;
+    final expiresAt = expires is num
+        ? _clock().toUtc().add(Duration(seconds: expires.toInt()))
+        : expirationFromAccessToken(access)!;
+    if (!expiresAt.isAfter(_clock().toUtc())) return null;
+    final idToken = payload['id_token'];
+    final accountFromIdToken = idToken is String
+        ? chatGptAccountIdFromIdToken(idToken)
+        : null;
+    // The pinned exchange response contains an id_token carrying this claim.
+    // Its refresh response may omit id_token; Codex itself preserves the prior
+    // account binding in that case because the refresh grant is account-bound.
+    final account = accountFromIdToken ?? (requireIdentity ? null : oldAccount);
+    if (account == null || account.isEmpty) return null;
     if (oldAccount != null && account != oldAccount) {
       return null;
     }
     return Credentials(
       accessToken: access,
       refreshToken: refresh,
-      expiresAt: _clock().toUtc().add(Duration(seconds: expires.toInt())),
+      expiresAt: expiresAt,
       generation: generation,
       accountId: account,
     );

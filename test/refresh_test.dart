@@ -84,7 +84,7 @@ void main() {
             'access_token': 'first-access',
             'refresh_token': 'first-refresh',
             'expires_in': 1,
-            'account_id': 'account',
+            'id_token': 'e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjb3VudCJ9fQ.sig',
           },
         },
         <String, Object?>{
@@ -93,7 +93,6 @@ void main() {
             'access_token': 'rotated-access',
             'refresh_token': 'rotated-refresh',
             'expires_in': 3600,
-            'account_id': 'account',
           },
         },
         <String, Object?>{
@@ -165,7 +164,7 @@ void main() {
             'access_token': 'access',
             'refresh_token': 'refresh',
             'expires_in': 1,
-            'account_id': 'account',
+            'id_token': 'e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoiYWNjb3VudCJ9fQ.sig',
           },
         },
         <String, Object?>{
