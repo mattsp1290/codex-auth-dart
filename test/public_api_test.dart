@@ -139,8 +139,32 @@ void main() {
         transport.requests.last.headers['chatgpt-account-id'],
         'test-account',
       );
+      expect(
+        transport.requests.last.headers['session_id'],
+        matches(
+          RegExp(
+            r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+          ),
+        ),
+      );
       expect(body['model'], 'gpt-5.6-sol');
       expect(body['reasoning'], <String, String>{'effort': 'medium'});
+      expect(body['instructions'], '');
+      expect(body['tools'], isEmpty);
+      expect(body['tool_choice'], 'auto');
+      expect(body['parallel_tool_calls'], isFalse);
+      expect(body['store'], isFalse);
+      expect(body['stream'], isTrue);
+      expect(body['include'], <String>['reasoning.encrypted_content']);
+      expect(body['input'], <Object?>[
+        <String, Object?>{
+          'type': 'message',
+          'role': 'user',
+          'content': <Object?>[
+            <String, String>{'type': 'input_text', 'text': 'minimal'},
+          ],
+        },
+      ]);
       expect(
         () => client.admitModel(snapshot, 'gpt-5.6-sol', 'low'),
         throwsA(isA<CodexAuthException>()),

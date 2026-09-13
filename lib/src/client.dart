@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'cancellation.dart';
 import 'credential_store.dart';
@@ -53,7 +54,8 @@ final class CodexAuthClient {
       _clock = options._clock ?? DateTime.now,
       _lifetimeCancellation = options.lifetimeCancellation,
       _refreshMargin = options.refreshMargin,
-      _catalogTtl = options.catalogTtl;
+      _catalogTtl = options.catalogTtl,
+      _sessionId = _newSessionId();
 
   final CredentialStore _store;
   final HttpTransport _transport;
@@ -61,6 +63,7 @@ final class CodexAuthClient {
   final CancellationSignal? _lifetimeCancellation;
   final Duration _refreshMargin;
   final Duration _catalogTtl;
+  final String _sessionId;
 
   CancellationSignal? _signal(CancellationSignal? operation) =>
       CombinedCancellationSignal(_lifetimeCancellation, operation);
@@ -339,10 +342,24 @@ final class CodexAuthClient {
       }
       final body = <String, Object?>{
         ...request.options,
-        'input': request.input,
+        'instructions': '',
+        'input': <Object?>[
+          <String, Object?>{
+            'type': 'message',
+            'role': 'user',
+            'content': <Object?>[
+              <String, String>{'type': 'input_text', 'text': request.input},
+            ],
+          },
+        ],
+        'tools': <Object?>[],
+        'tool_choice': 'auto',
+        'parallel_tool_calls': false,
         'model': admission._tuple.slug,
         'reasoning': <String, String>{'effort': admission._tuple.effort},
+        'store': false,
         'stream': true,
+        'include': <String>['reasoning.encrypted_content'],
       };
       final response = await _transport.send(
         HttpRequestData(
@@ -572,8 +589,20 @@ final class CodexAuthClient {
   Map<String, String> _authHeaders(Credentials credentials) => <String, String>{
     'authorization': 'Bearer ${credentials.accessToken}',
     'originator': codexOriginator,
+    'session_id': _sessionId,
+    'user-agent': 'codex-auth-dart/0.1.0 (dart)',
     'chatgpt-account-id': credentials.accountId,
   };
+
+  static String _newSessionId() {
+    final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes
+        .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+        .join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
 
   void _rejectRedirect(HttpResponseData response, String operation) {
     if (response.statusCode >= 300 && response.statusCode < 400) {
