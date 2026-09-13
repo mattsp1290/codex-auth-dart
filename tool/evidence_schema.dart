@@ -161,8 +161,12 @@ final class EvidenceSchema {
       if (predicates.keys.any((key) => !allowed.contains(key))) _fail();
       final substitute = row['hermeticTest'];
       if (state == 'not-safely-inducible') {
-        if (id != 'cancel-login' && id != 'expiry-decline') _fail();
-        _finiteLabel(substitute);
+        const hermeticTests = <String, String>{
+          'cancel-login': 'device-login-cancel',
+          'expiry-decline': 'device-login-expiry',
+        };
+        final expected = hermeticTests[id];
+        if (expected == null || substitute != expected) _fail();
       } else if (substitute != null) {
         _fail();
       }

@@ -134,6 +134,24 @@ void main() {
     );
   });
 
+  test('requires the exact hermetic test for safe non-inducible rows', () {
+    final invalid = _record();
+    final rows = invalid['rows']! as List<Object?>;
+    final index = rows.indexWhere(
+      (row) => (row as Map<String, Object?>)['id'] == 'cancel-login',
+    );
+    rows[index] = <String, Object?>{
+      'id': 'cancel-login',
+      'state': 'not-safely-inducible',
+      'predicates': <String, Object?>{},
+      'hermeticTest': 'different-test',
+    };
+    expect(
+      () => EvidenceSchema.validateRenderable(invalid),
+      throwsFormatException,
+    );
+  });
+
   test('raw result rejects stale nonces and unknown fields', () {
     expect(
       () => EvidenceSchema.validateRawResult(
