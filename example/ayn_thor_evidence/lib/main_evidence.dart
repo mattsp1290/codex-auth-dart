@@ -2,6 +2,7 @@ import 'package:codex_auth/codex_auth.dart';
 import 'package:flutter/material.dart';
 
 import 'build_provenance.dart';
+import 'evidence_controller.dart';
 import 'evidence_controls.dart';
 import 'evidence_state_store.dart';
 import 'main.dart';
@@ -67,6 +68,25 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     );
   }
 
+  Future<void> _completeApprovedLogin(
+    EvidenceCommand command,
+    EvidenceEvent event,
+    AuthStatus status,
+  ) => _stateStore.writeResult(
+    EvidenceResult(
+      command: command,
+      state:
+          event.state == EvidenceState.passed && status == AuthStatus.signedIn
+          ? EvidenceResultState.pass
+          : EvidenceResultState.fail,
+      recovery: status == AuthStatus.signedIn
+          ? EvidenceRecovery.signedIn
+          : EvidenceRecovery.reauthenticationRequired,
+      protectedIo: 0,
+      category: event.category?.name,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final command = _command;
@@ -78,6 +98,13 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     if (command == null) {
       return const MaterialApp(
         home: Scaffold(body: Center(child: Text('Awaiting evidence command'))),
+      );
+    }
+    if (command.scenario == EvidenceScenario.approvedLogin) {
+      return EvidenceHostApp(
+        autoStartDeviceLogin: true,
+        onDeviceLoginFinished: (event, status) =>
+            _completeApprovedLogin(command, event, status),
       );
     }
     return MaterialApp(home: _EvidenceLanding(command: command));

@@ -12,17 +12,34 @@ void main() => runApp(const EvidenceHostApp());
 
 /// Ordinary host entrypoint. It deliberately imports no evidence controls.
 final class EvidenceHostApp extends StatelessWidget {
-  const EvidenceHostApp({super.key});
+  const EvidenceHostApp({
+    super.key,
+    this.autoStartDeviceLogin = false,
+    this.onDeviceLoginFinished,
+  });
+
+  final bool autoStartDeviceLogin;
+  final Future<void> Function(EvidenceEvent event, AuthStatus status)?
+  onDeviceLoginFinished;
 
   @override
-  Widget build(BuildContext context) => const MaterialApp(
+  Widget build(BuildContext context) => MaterialApp(
     title: 'Codex authentication evidence',
-    home: _EvidenceHome(),
+    home: _EvidenceHome(
+      autoStartDeviceLogin: autoStartDeviceLogin,
+      onDeviceLoginFinished: onDeviceLoginFinished,
+    ),
   );
 }
 
 final class _EvidenceHome extends StatefulWidget {
-  const _EvidenceHome();
+  const _EvidenceHome({
+    required this.autoStartDeviceLogin,
+    required this.onDeviceLoginFinished,
+  });
+  final bool autoStartDeviceLogin;
+  final Future<void> Function(EvidenceEvent event, AuthStatus status)?
+  onDeviceLoginFinished;
 
   @override
   State<_EvidenceHome> createState() => _EvidenceHomeState();
@@ -32,6 +49,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
     with WidgetsBindingObserver {
   late EvidenceController _controller;
   AuthStatus _durableStatus = AuthStatus.signedOut;
+  var _automaticLoginStarted = false;
 
   @override
   void initState() {
@@ -50,6 +68,17 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
       ),
     )..addListener(_changed);
     unawaited(_readDurableStatus());
+    if (widget.autoStartDeviceLogin && !_automaticLoginStarted) {
+      _automaticLoginStarted = true;
+      unawaited(_runAutomaticDeviceLogin());
+    }
+  }
+
+  Future<void> _runAutomaticDeviceLogin() async {
+    final event = await _controller.startDeviceLogin();
+    final status = await _controller.status();
+    await widget.onDeviceLoginFinished?.call(event, status);
+    if (mounted) setState(() => _durableStatus = status);
   }
 
   Future<void> _readDurableStatus() async {

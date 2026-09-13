@@ -47,8 +47,8 @@ final class EvidenceController {
     }
   }
 
-  Future<void> startDeviceLogin() async {
-    if (state == EvidenceState.waitingForApproval) return;
+  Future<EvidenceEvent> startDeviceLogin() async {
+    if (state == EvidenceState.waitingForApproval) return event;
     _cancellation = CancellationController();
     try {
       await _client.loginDevice(
@@ -81,6 +81,7 @@ final class EvidenceController {
     } finally {
       _notify();
     }
+    return event;
   }
 
   void cancel() => _cancellation?.cancel();
