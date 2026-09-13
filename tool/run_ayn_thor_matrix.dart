@@ -129,10 +129,13 @@ Future<void> _run(
     primaryFailure = error;
     rethrow;
   } finally {
-    setStage('cleanup');
     try {
+      setStage('cleanup-clear');
       await runner.clearTransientState();
-      if (redirect != null) await redirect.close(runner);
+      if (redirect != null) {
+        setStage('cleanup-redirect');
+        await redirect.close(runner);
+      }
     } on Object {
       if (primaryFailure == null) rethrow;
     }
