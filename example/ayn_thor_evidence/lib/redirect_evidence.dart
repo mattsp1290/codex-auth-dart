@@ -16,7 +16,7 @@ final class RedirectEvidence {
             HttpRequestData(
               method: requestClass.method,
               uri: Uri.parse(
-                'http://127.0.0.1:8787/source/${requestClass.id}/$status',
+                'http://127.0.0.1:8787/source/${requestClass.id}-$status/$status',
               ),
               headers: requestClass.headers,
               body: requestClass.body,

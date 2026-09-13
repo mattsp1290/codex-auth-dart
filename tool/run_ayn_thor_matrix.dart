@@ -76,6 +76,11 @@ Future<void> _run(
   }
   setStage('clear-previous-state');
   await runner.clearTransientState();
+  _RedirectFixture? redirect;
+  if (options.scenario == 'redirect-matrix') {
+    setStage('redirect-fixture');
+    redirect = await _RedirectFixture.start(runner);
+  }
   final nonce = _nonce();
   final command = jsonEncode(<String, Object?>{
     'schemaVersion': 1,
@@ -102,6 +107,10 @@ Future<void> _run(
       packageCommit: options.packageCommit,
       nonce: nonce,
     );
+    if (redirect != null) {
+      setStage('redirect-validation');
+      await redirect.verify();
+    }
     stdout.writeln(
       jsonEncode(<String, Object?>{
         'device': 'ayn-thor',
@@ -115,6 +124,7 @@ Future<void> _run(
   } finally {
     setStage('cleanup');
     await runner.clearTransientState();
+    if (redirect != null) await redirect.close(runner);
   }
 }
 
@@ -258,6 +268,22 @@ final class _Adb {
     return result.exitCode == 0;
   }
 
+  Future<void> reversePort(int port) =>
+      _run(<String>['reverse', 'tcp:$port', 'tcp:$port']);
+
+  Future<void> removeReversePort(int port) async {
+    final result = await Process.run(_adb, <String>[
+      '-s',
+      _serial,
+      'reverse',
+      '--remove',
+      'tcp:$port',
+    ]);
+    if (result.exitCode != 0) {
+      throw StateError('redirect mapping cleanup failed');
+    }
+  }
+
   Future<void> launch() async {
     await _run(<String>['shell', 'am', 'force-stop', _package]);
     await _run(<String>['shell', 'monkey', '-p', _package, '1']);
@@ -293,6 +319,147 @@ final class _Adb {
     ]);
     if (result.exitCode != 0) throw StateError('Android command failed');
     return result.stdout as String;
+  }
+}
+
+final class _RedirectFixture {
+  _RedirectFixture(this._process);
+  static const _port = 8787;
+  final Process _process;
+
+  static Future<_RedirectFixture> start(_Adb adb) async {
+    final toolDirectory = File.fromUri(Platform.script).parent;
+    final process = await Process.start(Platform.resolvedExecutable, <String>[
+      '${toolDirectory.path}${Platform.pathSeparator}redirect_probe_server.dart',
+      '$_port',
+    ]);
+    final fixture = _RedirectFixture(process);
+    try {
+      await fixture._awaitReady();
+      await adb.reversePort(_port);
+      return fixture;
+    } on Object {
+      process.kill(ProcessSignal.sigterm);
+      await process.exitCode;
+      rethrow;
+    }
+  }
+
+  Future<void> _awaitReady() async {
+    for (var attempt = 0; attempt < 20; attempt++) {
+      try {
+        final client = HttpClient();
+        try {
+          final request = await client.getUrl(
+            Uri.parse('http://127.0.0.1:$_port/status'),
+          );
+          final response = await request.close();
+          await response.drain<void>();
+          if (response.statusCode == HttpStatus.ok) return;
+        } finally {
+          client.close(force: true);
+        }
+      } on Object {
+        // The next bounded probe decides whether startup succeeded.
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    throw StateError('redirect fixture did not start');
+  }
+
+  Future<void> verify() async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(
+        Uri.parse('http://127.0.0.1:$_port/status'),
+      );
+      final response = await request.close();
+      if (response.statusCode != HttpStatus.ok) {
+        throw StateError('redirect status unavailable');
+      }
+      final value = jsonDecode(await utf8.decoder.bind(response).join());
+      if (value is! Map || value['cases'] is! Map || value['target'] is! Map) {
+        throw StateError('redirect status invalid');
+      }
+      final cases = Map<String, Object?>.from(value['cases'] as Map);
+      if (cases.length != 25) throw StateError('redirect cases incomplete');
+      _verifyStats(
+        Map<String, Object?>.from(value['target'] as Map),
+        const <String, bool>{},
+      );
+      for (final requestClass in _redirectShapes.entries) {
+        for (final status in <int>[301, 302, 303, 307, 308]) {
+          final stats = cases['${requestClass.key}-$status'];
+          if (stats is! Map) throw StateError('redirect case missing');
+          _verifyStats(Map<String, Object?>.from(stats), requestClass.value);
+        }
+      }
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<void> close(_Adb adb) async {
+    try {
+      await adb.removeReversePort(_port);
+    } finally {
+      _process.kill(ProcessSignal.sigterm);
+      await _process.exitCode;
+    }
+  }
+
+  static const _redirectShapes = <String, Map<String, bool>>{
+    'device-json': {
+      'authorization': false,
+      'deviceAuthId': true,
+      'userCode': true,
+      'authorizationCode': false,
+      'refreshToken': false,
+    },
+    'authorization-code-form': {
+      'authorization': false,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': true,
+      'refreshToken': false,
+    },
+    'refresh-token-form': {
+      'authorization': false,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': false,
+      'refreshToken': true,
+    },
+    'catalog-bearer': {
+      'authorization': true,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': false,
+      'refreshToken': false,
+    },
+    'responses-bearer': {
+      'authorization': true,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': false,
+      'refreshToken': false,
+    },
+  };
+
+  static void _verifyStats(
+    Map<String, Object?> value,
+    Map<String, bool> expected,
+  ) {
+    if (value['hits'] != (expected.isEmpty ? 0 : 1) || value['shape'] is! Map) {
+      throw StateError('redirect counters invalid');
+    }
+    final shape = Map<String, Object?>.from(value['shape'] as Map);
+    if (shape.length != 5 ||
+        shape.entries.any(
+          (entry) => entry.value != (expected[entry.key] ?? false),
+        )) {
+      throw StateError('redirect credential shape invalid');
+    }
   }
 }
 
