@@ -152,7 +152,7 @@ final class _Adb {
 
   Future<void> requirePhysicalDevice() async {
     final state = await _run(<String>['get-state']);
-    if (state != 'device') {
+    if (state.trim() != 'device') {
       throw StateError('selected Android device is unavailable');
     }
     final emulator = await _run(<String>['shell', 'getprop', 'ro.kernel.qemu']);
