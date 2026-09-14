@@ -415,10 +415,7 @@ final class CodexAuthClient {
         await response.close?.call();
         throw _safeResponseError(response.statusCode, 'sendResponses');
       }
-      return CodexResponseStream(
-        response.body,
-        () async => response.close?.call(),
-      );
+      return _ownedResponseStream(response);
     });
   }
 
@@ -732,6 +729,41 @@ final class CodexAuthClient {
     } on Object {
       throw _cleanupRequired(operation);
     }
+  }
+
+  CodexResponseStream _ownedResponseStream(HttpResponseData response) {
+    late StreamController<List<int>> controller;
+    StreamSubscription<List<int>>? subscription;
+    var closed = false;
+
+    Future<void> closeOnce({bool cancelSource = true}) async {
+      if (closed) return;
+      closed = true;
+      if (cancelSource) await subscription?.cancel();
+      await response.close?.call();
+    }
+
+    Future<void> finish() async {
+      await closeOnce(cancelSource: false);
+      await controller.close();
+    }
+
+    controller = StreamController<List<int>>(
+      onListen: () {
+        subscription = response.body.listen(
+          controller.add,
+          onError: (Object error, StackTrace stackTrace) {
+            controller.addError(error, stackTrace);
+            unawaited(finish());
+          },
+          onDone: () => unawaited(finish()),
+        );
+      },
+      onPause: () => subscription?.pause(),
+      onResume: () => subscription?.resume(),
+      onCancel: closeOnce,
+    );
+    return CodexResponseStream(controller.stream, closeOnce);
   }
 
   CodexAuthException _cleanupRequired(String operation) => CodexAuthException(
