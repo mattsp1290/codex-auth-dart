@@ -22,6 +22,8 @@ final class HttpTransportException implements Exception {
 enum HttpTransportOutcome {
   connectTimeout,
   responseHeaderTimeout,
+  streamIdleTimeout,
+  overallTimeout,
   cancelled,
   failed,
 }
@@ -68,11 +70,15 @@ final class DartIoHttpTransport implements HttpTransport {
     HttpClient Function()? clientFactory,
     this.connectTimeout = const Duration(seconds: 15),
     this.responseHeaderTimeout = const Duration(seconds: 30),
+    this.streamIdleTimeout = const Duration(seconds: 30),
+    this.overallTimeout = const Duration(minutes: 2),
   }) : _clientFactory = clientFactory ?? HttpClient.new;
 
   final HttpClient Function() _clientFactory;
   final Duration connectTimeout;
   final Duration responseHeaderTimeout;
+  final Duration streamIdleTimeout;
+  final Duration overallTimeout;
   final Set<HttpClient> _clients = <HttpClient>{};
 
   @override
@@ -80,7 +86,13 @@ final class DartIoHttpTransport implements HttpTransport {
     HttpRequestData request, {
     CancellationSignal? cancellation,
   }) async {
-    throwIfCancelled(cancellation);
+    if (cancellation?.isCancelled ?? false) {
+      throw const HttpTransportException(
+        HttpDispatchPhase.notDispatched,
+        HttpTransportOutcome.cancelled,
+      );
+    }
+    final deadline = DateTime.now().add(overallTimeout);
     final client = _clientFactory();
     _clients.add(client);
     // ignore: close_sinks
@@ -93,6 +105,7 @@ final class DartIoHttpTransport implements HttpTransport {
         HttpDispatchPhase.notDispatched,
         HttpTransportOutcome.connectTimeout,
         client,
+        deadline,
       );
       final HttpClientRequest openedRequest = ioRequest!;
       openedRequest.followRedirects = false;
@@ -109,29 +122,32 @@ final class DartIoHttpTransport implements HttpTransport {
         HttpDispatchPhase.possiblyDispatched,
         HttpTransportOutcome.responseHeaderTimeout,
         client,
+        deadline,
       );
       final headers = <String, String>{};
       response.headers.forEach(
         (name, values) => headers[name.toLowerCase()] = values.join(','),
       );
       var closed = false;
+      Future<void> closeOwned() async {
+        if (closed) return;
+        closed = true;
+        try {
+          await response
+              .detachSocket()
+              .then((socket) => socket.destroy())
+              .catchError((_) {});
+        } finally {
+          _clients.remove(client);
+          client.close(force: true);
+        }
+      }
+
       return HttpResponseData(
         response.statusCode,
         headers,
-        response,
-        close: () async {
-          if (closed) return;
-          closed = true;
-          try {
-            await response
-                .detachSocket()
-                .then((socket) => socket.destroy())
-                .catchError((_) {});
-          } finally {
-            _clients.remove(client);
-            client.close(force: true);
-          }
-        },
+        _boundedBody(response, deadline, closeOwned),
+        close: closeOwned,
       );
     } on OperationCancelled {
       _clients.remove(client);
@@ -167,19 +183,124 @@ final class DartIoHttpTransport implements HttpTransport {
     HttpDispatchPhase phase,
     HttpTransportOutcome timeoutOutcome,
     HttpClient client,
+    DateTime overallDeadline,
   ) async {
-    final timeoutFuture = Future<T>.delayed(timeout, () {
+    final completer = Completer<T>();
+    void fail(HttpTransportOutcome outcome) {
+      if (completer.isCompleted) return;
       client.close(force: true);
-      throw HttpTransportException(phase, timeoutOutcome);
-    });
-    if (cancellation == null) {
-      return Future.any(<Future<T>>[future, timeoutFuture]);
+      completer.completeError(HttpTransportException(phase, outcome));
     }
-    final cancelled = cancellation.whenCancelled.then<T>((_) {
-      client.close(force: true);
-      throw HttpTransportException(phase, HttpTransportOutcome.cancelled);
-    });
-    return Future.any(<Future<T>>[future, timeoutFuture, cancelled]);
+
+    final phaseTimer = Timer(timeout, () => fail(timeoutOutcome));
+    final remaining = overallDeadline.difference(DateTime.now());
+    final overallTimer = Timer(
+      remaining.isNegative ? Duration.zero : remaining,
+      () => fail(HttpTransportOutcome.overallTimeout),
+    );
+    unawaited(
+      future.then<void>(
+        (value) {
+          if (!completer.isCompleted) completer.complete(value);
+        },
+        onError: (Object error, StackTrace stackTrace) {
+          if (!completer.isCompleted) {
+            completer.completeError(error, stackTrace);
+          }
+        },
+      ),
+    );
+    if (cancellation != null) {
+      unawaited(
+        cancellation.whenCancelled.then<void>(
+          (_) => fail(HttpTransportOutcome.cancelled),
+        ),
+      );
+    }
+    try {
+      return await completer.future;
+    } finally {
+      phaseTimer.cancel();
+      overallTimer.cancel();
+    }
+  }
+
+  Stream<List<int>> _boundedBody(
+    Stream<List<int>> source,
+    DateTime overallDeadline,
+    Future<void> Function() closeOwned,
+  ) {
+    late StreamController<List<int>> controller;
+    StreamSubscription<List<int>>? subscription;
+    Timer? idleTimer;
+    Timer? overallTimer;
+    var terminal = false;
+
+    void cancelTimers() {
+      idleTimer?.cancel();
+      overallTimer?.cancel();
+    }
+
+    void fail(HttpTransportOutcome outcome) {
+      if (terminal) return;
+      terminal = true;
+      cancelTimers();
+      unawaited(subscription?.cancel());
+      unawaited(closeOwned());
+      controller.addError(
+        HttpTransportException(HttpDispatchPhase.possiblyDispatched, outcome),
+      );
+      unawaited(controller.close());
+    }
+
+    void resetIdleTimer() {
+      idleTimer?.cancel();
+      idleTimer = Timer(
+        streamIdleTimeout,
+        () => fail(HttpTransportOutcome.streamIdleTimeout),
+      );
+    }
+
+    controller = StreamController<List<int>>(
+      onListen: () {
+        resetIdleTimer();
+        final remaining = overallDeadline.difference(DateTime.now());
+        overallTimer = Timer(
+          remaining.isNegative ? Duration.zero : remaining,
+          () => fail(HttpTransportOutcome.overallTimeout),
+        );
+        subscription = source.listen(
+          (data) {
+            if (terminal) return;
+            resetIdleTimer();
+            controller.add(data);
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (terminal) return;
+            terminal = true;
+            cancelTimers();
+            controller.addError(error, stackTrace);
+            unawaited(controller.close());
+          },
+          onDone: () {
+            if (terminal) return;
+            terminal = true;
+            cancelTimers();
+            unawaited(closeOwned());
+            unawaited(controller.close());
+          },
+        );
+      },
+      onPause: () => subscription?.pause(),
+      onResume: () => subscription?.resume(),
+      onCancel: () async {
+        terminal = true;
+        cancelTimers();
+        await subscription?.cancel();
+        await closeOwned();
+      },
+    );
+    return controller.stream;
   }
 
   void close({bool force = false}) {
