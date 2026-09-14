@@ -42,7 +42,7 @@ final class CredentialStateStore implements CredentialStore {
     final recovered = await _recoverUnlocked();
     throwIfCancelled(cancellation);
     return action(_StateTransaction(this, recovered));
-  });
+  }, cancellation: cancellation);
 
   Future<_Envelope?> _readEnvelope() async {
     final raw = await _driver.read();
@@ -197,15 +197,33 @@ final class _Envelope {
 
 final class _NamespaceMutex {
   Future<void> _tail = Future<void>.value();
-  Future<T> run<T>(Future<T> Function() action) async {
+  Future<T> run<T>(
+    Future<T> Function() action, {
+    CancellationSignal? cancellation,
+  }) async {
     final prior = _tail;
     final release = Completer<void>();
     _tail = release.future;
-    await prior;
+    var entered = false;
     try {
+      throwIfCancelled(cancellation);
+      if (cancellation == null) {
+        await prior;
+      } else {
+        await Future.any(<Future<void>>[
+          prior,
+          cancellation.whenCancelled.then((_) => throw OperationCancelled()),
+        ]);
+      }
+      throwIfCancelled(cancellation);
+      entered = true;
       return await action();
     } finally {
-      release.complete();
+      if (entered) {
+        release.complete();
+      } else {
+        unawaited(prior.whenComplete(release.complete));
+      }
     }
   }
 }

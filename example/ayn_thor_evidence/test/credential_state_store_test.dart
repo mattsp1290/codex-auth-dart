@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:ayn_thor_evidence/credential_state_store.dart';
 import 'package:codex_auth/codex_auth.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -18,6 +20,42 @@ final class _Driver implements DurableRecordDriver {
 }
 
 void main() {
+  test(
+    'cancelled waiter exits promptly without overtaking the holder',
+    () async {
+      final store = CredentialStateStore(driver: _Driver());
+      final holderEntered = Completer<void>();
+      final releaseHolder = Completer<void>();
+      final holder = store.transaction((_) async {
+        holderEntered.complete();
+        await releaseHolder.future;
+      });
+      await holderEntered.future;
+
+      final cancellation = CancellationController();
+      var cancelledActionEntered = false;
+      final waiter = store.transaction((_) async {
+        cancelledActionEntered = true;
+      }, cancellation: cancellation);
+      cancellation.cancel();
+      await expectLater(
+        waiter.timeout(const Duration(milliseconds: 100)),
+        throwsA(isA<OperationCancelled>()),
+      );
+      expect(cancelledActionEntered, isFalse);
+
+      var followerEntered = false;
+      final follower = store.transaction((_) async {
+        followerEntered = true;
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(followerEntered, isFalse);
+      releaseHolder.complete();
+      await Future.wait(<Future<void>>[holder, follower]);
+      expect(followerEntered, isTrue);
+    },
+  );
+
   test(
     'refresh-risk recovery clears state before a fresh graph may use it',
     () async {
