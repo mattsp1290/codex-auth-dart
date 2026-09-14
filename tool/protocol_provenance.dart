@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'src/protocol_contract.dart';
+
 const _cliVersion = '0.154.0';
 const _officialTag = 'rust-v0.154.0';
 const _officialCommit = '6b9826e3aa83b1a5947db50f4332cb9c65f1b340';
@@ -99,41 +101,9 @@ void _verifyCheckout(Directory root) {
       'official source checkout revision differs from the release',
     );
   }
-  final files =
-      <String>[
-            'codex-rs/login/src/device_code_auth.rs',
-            'codex-rs/login/src/auth/manager.rs',
-            'codex-rs/codex-api/src/endpoint/models.rs',
-            'codex-rs/codex-api/src/endpoint/responses.rs',
-          ]
-          .map(
-            (relative) =>
-                File('${root.path}${Platform.pathSeparator}$relative'),
-          )
-          .toList();
-  if (files.any((file) => !file.existsSync())) {
-    throw StateError('official source protocol layout is unavailable');
-  }
-  final required = <bool>[
-    files[0].readAsStringSync().contains('/deviceauth/usercode'),
-    files[0].readAsStringSync().contains('/deviceauth/token'),
-    files[0].readAsStringSync().contains('device_auth_id'),
-    files[0].readAsStringSync().contains('user_code'),
-    files[0].readAsStringSync().contains('code_verifier'),
-    files[0].readAsStringSync().contains('authorization_code'),
-    files[0].readAsStringSync().contains('Duration::from_secs(15 * 60)'),
-    files[0].readAsStringSync().contains('/deviceauth/callback'),
-    files[1].readAsStringSync().contains('app_EMoamEEZ73f0CkXaXp7hrann'),
-    files[1].readAsStringSync().contains('grant_type: "refresh_token"'),
-    files[1].readAsStringSync().contains('refresh_token: Option<String>'),
-    files[1].readAsStringSync().contains('"invalid_grant"'),
-    files[2].readAsStringSync().contains('client_version'),
-    files[2].readAsStringSync().contains('Method::GET'),
-    files[3].readAsStringSync().contains('"/responses"'),
-    files[3].readAsStringSync().contains('Method::POST'),
-    files[3].readAsStringSync().contains('spawn_response_stream'),
-  ];
-  if (required.any((present) => !present)) {
+  try {
+    verifyProtocolContract(root);
+  } on FormatException {
     throw StateError(
       'official source differs from the expected protocol contract',
     );
