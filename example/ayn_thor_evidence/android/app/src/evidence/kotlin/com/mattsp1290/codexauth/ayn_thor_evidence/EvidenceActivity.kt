@@ -18,6 +18,13 @@ class EvidenceActivity : MainActivity() {
                             if (raw == null || raw.length > maxChars) result.error("invalid", null, null)
                             else result.success(writeResult(raw))
                         }
+                        "readCheckpoint" -> result.success(readCheckpoint())
+                        "writeCheckpoint" -> {
+                            val raw = call.argument<String>("checkpoint")
+                            if (raw == null || raw.length > maxChars) result.error("invalid", null, null)
+                            else result.success(writeCheckpoint(raw))
+                        }
+                        "clearCheckpoint" -> result.success(clearCheckpoint())
                         else -> result.notImplemented()
                     }
                 } catch (_: Exception) {
@@ -45,9 +52,30 @@ class EvidenceActivity : MainActivity() {
         return true
     }
 
+    private fun readCheckpoint(): String? {
+        val checkpoint = File(filesDir, checkpointName)
+        if (!checkpoint.exists() || checkpoint.length() > maxChars.toLong()) return null
+        return checkpoint.readText(Charsets.UTF_8)
+    }
+
+    private fun writeCheckpoint(raw: String): Boolean {
+        val target = File(filesDir, checkpointName)
+        val temporary = File(filesDir, "$checkpointName.tmp")
+        temporary.writeText(raw, Charsets.UTF_8)
+        if (!temporary.renameTo(target)) {
+            temporary.delete()
+            return false
+        }
+        return true
+    }
+
+    private fun clearCheckpoint(): Boolean =
+        !File(filesDir, checkpointName).exists() || File(filesDir, checkpointName).delete()
+
     companion object {
         private const val commandName = "evidence-command.json"
         private const val resultName = "evidence-result.json"
+        private const val checkpointName = "evidence-checkpoint.json"
         private const val maxChars = 32768
     }
 }

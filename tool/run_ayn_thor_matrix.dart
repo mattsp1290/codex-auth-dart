@@ -270,10 +270,13 @@ final class _Adb implements AynThorMatrixAdapter {
           'sh',
           '-c',
           'rm -f files/evidence-command.json files/evidence-result.json '
-              'files/evidence-result.json.tmp && '
+              'files/evidence-result.json.tmp files/evidence-checkpoint.json '
+              'files/evidence-checkpoint.json.tmp && '
               'test ! -e files/evidence-command.json && '
               'test ! -e files/evidence-result.json && '
-              'test ! -e files/evidence-result.json.tmp',
+              'test ! -e files/evidence-result.json.tmp && '
+              'test ! -e files/evidence-checkpoint.json && '
+              'test ! -e files/evidence-checkpoint.json.tmp',
         ], timeout: _commandTimeout);
         if (!result.succeeded) {
           throw StateError('transient evidence state cannot be cleared');
@@ -333,6 +336,47 @@ final class _Adb implements AynThorMatrixAdapter {
       '-n',
       '$_package/com.mattsp1290.codexauth.ayn_thor_evidence.EvidenceActivity',
     ]);
+  }
+
+  @override
+  Future<String> processIdentity(Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final result = await _executor.runText(_adb, <String>[
+        '-s',
+        _serial,
+        'shell',
+        'pidof',
+        _package,
+      ], timeout: _commandTimeout);
+      final value = result.stdoutText.trim();
+      if (result.succeeded && value.isNotEmpty) return value;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    throw StateError('evidence process unavailable');
+  }
+
+  @override
+  Future<void> waitForCheckpoint(Duration timeout) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final result = await _executor.runText(_adb, <String>[
+        '-s',
+        _serial,
+        'exec-out',
+        'run-as',
+        _package,
+        'sh',
+        '-c',
+        'test -s files/evidence-checkpoint.json && '
+            'cat files/evidence-checkpoint.json',
+      ], timeout: _commandTimeout);
+      if (result.succeeded && isFiniteResultCandidate(result.stdoutText)) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    throw StateError('durable evidence checkpoint timed out');
   }
 
   @override

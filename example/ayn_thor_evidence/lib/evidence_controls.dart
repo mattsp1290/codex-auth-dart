@@ -44,6 +44,14 @@ final class EvidenceCommand {
   final String flavor;
   final String nonce;
 
+  Map<String, Object?> toJson() => <String, Object?>{
+    'schemaVersion': 1,
+    'scenario': scenario.wireName,
+    'packageCommit': packageCommit,
+    'flavor': flavor,
+    'nonce': nonce,
+  };
+
   static EvidenceCommand decode(String source) {
     final value = jsonDecode(source);
     if (value is! Map<String, Object?> ||
@@ -69,6 +77,75 @@ final class EvidenceCommand {
       packageCommit: value['packageCommit']! as String,
       flavor: 'evidence',
       nonce: value['nonce']! as String,
+    );
+  }
+}
+
+enum EvidenceCheckpointPhase {
+  refreshRisk('refresh-risk'),
+  beforeReplacement('before-replacement'),
+  afterReplacement('after-replacement');
+
+  const EvidenceCheckpointPhase(this.wireName);
+  final String wireName;
+}
+
+final class EvidenceCheckpoint {
+  const EvidenceCheckpoint({
+    required this.command,
+    required this.phase,
+    required this.refreshResponseCount,
+    required this.replacementAcknowledged,
+    required this.replacementGenerationVerified,
+  });
+
+  final EvidenceCommand command;
+  final EvidenceCheckpointPhase phase;
+  final int refreshResponseCount;
+  final bool replacementAcknowledged;
+  final bool replacementGenerationVerified;
+
+  String encode() => jsonEncode(<String, Object?>{
+    'schemaVersion': 1,
+    'command': command.toJson(),
+    'phase': phase.wireName,
+    'refreshResponseCount': refreshResponseCount,
+    'replacementAcknowledged': replacementAcknowledged,
+    'replacementGenerationVerified': replacementGenerationVerified,
+  });
+
+  static EvidenceCheckpoint decode(String source) {
+    final value = jsonDecode(source);
+    if (value is! Map ||
+        value.keys.toSet().length != 6 ||
+        !value.keys.toSet().containsAll(<String>{
+          'schemaVersion',
+          'command',
+          'phase',
+          'refreshResponseCount',
+          'replacementAcknowledged',
+          'replacementGenerationVerified',
+        }) ||
+        value['schemaVersion'] != 1 ||
+        value['command'] is! Map ||
+        value['refreshResponseCount'] is! int ||
+        value['replacementAcknowledged'] is! bool ||
+        value['replacementGenerationVerified'] is! bool) {
+      throw const FormatException('invalid evidence checkpoint');
+    }
+    final phase = EvidenceCheckpointPhase.values.where(
+      (candidate) => candidate.wireName == value['phase'],
+    );
+    if (phase.length != 1) {
+      throw const FormatException('invalid evidence checkpoint');
+    }
+    return EvidenceCheckpoint(
+      command: EvidenceCommand.decode(jsonEncode(value['command'])),
+      phase: phase.single,
+      refreshResponseCount: value['refreshResponseCount']! as int,
+      replacementAcknowledged: value['replacementAcknowledged']! as bool,
+      replacementGenerationVerified:
+          value['replacementGenerationVerified']! as bool,
     );
   }
 }

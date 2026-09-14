@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:test/test.dart';
 
 import '../tool/evidence_schema.dart';
@@ -64,7 +66,7 @@ Map<String, Object?> _record() => <String, Object?>{
 
 String _rawResult({required String nonce}) =>
     '''
-{"schemaVersion":1,"scenario":"local-logout","packageCommit":"${'a' * 40}","flavor":"evidence","nonce":"$nonce","state":"pass","recovery":"signed-out","protectedIo":0,"predicates":{}}
+{"schemaVersion":1,"scenario":"local-logout","packageCommit":"${'a' * 40}","flavor":"evidence","nonce":"$nonce","state":"pass","recovery":"signed-out","protectedIo":0,"predicates":{"clearAcknowledged":true,"signedOut":true,"noRemoteRevocation":true}}
 ''';
 
 void main() {
@@ -182,6 +184,23 @@ void main() {
         nonce: 'e' * 64,
       ),
       RawEvidenceRejection.nonce,
+    );
+  });
+
+  test('raw pass rejects a false or missing scenario predicate', () {
+    final value = jsonDecode(_rawResult(nonce: 'd' * 64));
+    final predicates =
+        (value as Map<String, Object?>)['predicates']! as Map<String, Object?>;
+    predicates['signedOut'] = false;
+
+    expect(
+      EvidenceSchema.diagnoseRawResult(
+        jsonEncode(value),
+        scenario: 'local-logout',
+        packageCommit: 'a' * 40,
+        nonce: 'd' * 64,
+      ),
+      RawEvidenceRejection.predicates,
     );
   });
 }

@@ -15,7 +15,9 @@ enum MatrixStage {
   finiteResult('finite-result'),
   commandConsumption('command-consumption'),
   validateResult('validate-result'),
-  redirectValidation('redirect-validation');
+  redirectValidation('redirect-validation'),
+  durableCheckpoint('durable-checkpoint'),
+  processRelaunch('process-relaunch');
 
   const MatrixStage(this.label);
   final String label;
@@ -80,6 +82,8 @@ abstract interface class AynThorMatrixAdapter {
   Future<void> removeReverseRedirectPort();
   Future<void> writeCommand(String command);
   Future<void> launch();
+  Future<String> processIdentity(Duration timeout);
+  Future<void> waitForCheckpoint(Duration timeout);
   Future<String> waitForResult(Duration timeout);
   Future<bool> commandWasConsumed();
   Future<void> stop();
@@ -153,8 +157,25 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
     progress(MatrixStage.launch);
     appMayRun = true;
     await adapter.launch();
+    var processChanged = false;
+    if (_interruptionScenarios.contains(request.scenario)) {
+      final originalProcess = await adapter.processIdentity(
+        const Duration(seconds: 15),
+      );
+      progress(MatrixStage.durableCheckpoint);
+      await adapter.waitForCheckpoint(request.resultTimeout);
+      progress(MatrixStage.processRelaunch);
+      await adapter.stop();
+      await adapter.launch();
+      final replacementProcess = await adapter.processIdentity(
+        const Duration(seconds: 15),
+      );
+      processChanged = originalProcess != replacementProcess;
+      if (!processChanged) throw StateError('evidence process did not change');
+    }
     progress(MatrixStage.finiteResult);
-    final raw = await adapter.waitForResult(request.resultTimeout);
+    var raw = await adapter.waitForResult(request.resultTimeout);
+    if (processChanged) raw = _withProcessChanged(raw);
     progress(MatrixStage.commandConsumption);
     if (!await adapter.commandWasConsumed()) {
       throw StateError('evidence command was not consumed');
@@ -185,6 +206,7 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
       'state': result['state'],
       'recovery': result['recovery'],
       'protectedIo': result['protectedIo'],
+      'predicates': result['predicates'],
       if (result['category'] != null) 'category': result['category'],
     });
   } on Object catch (error) {
@@ -235,4 +257,22 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
     );
   }
   return MatrixRunSuccess(safeJson!);
+}
+
+const _interruptionScenarios = <String>{
+  'interrupt-after-refresh-risk',
+  'interrupt-before-replacement-commit',
+  'interrupt-after-replacement-commit',
+};
+
+String _withProcessChanged(String raw) {
+  final value = jsonDecode(raw);
+  if (value is! Map || value['predicates'] is! Map) {
+    throw const FormatException('invalid finite evidence result');
+  }
+  final result = Map<String, Object?>.from(value);
+  final predicates = Map<String, Object?>.from(value['predicates']! as Map);
+  predicates['processChanged'] = true;
+  result['predicates'] = predicates;
+  return jsonEncode(result);
 }

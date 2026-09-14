@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'build_provenance.dart';
 import 'evidence_controller.dart';
 import 'evidence_controls.dart';
+import 'evidence_interruption_scenarios.dart';
 import 'evidence_recovery_scenarios.dart';
 import 'evidence_state_store.dart';
 import 'main.dart';
@@ -26,6 +27,7 @@ final class _EvidenceModeApp extends StatefulWidget {
 final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
   final _stateStore = const EvidenceStateStore();
   EvidenceCommand? _command;
+  EvidenceCheckpoint? _checkpoint;
   var _invalidCommand = false;
 
   @override
@@ -38,10 +40,19 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     EvidenceCommand? command;
     try {
       command = await _stateStore.consumeCommand();
+      final checkpoint = command == null
+          ? await _stateStore.readCheckpoint()
+          : null;
+      command ??= checkpoint?.command;
       if (command?.scenario == EvidenceScenario.localLogout) {
         await _runLocalLogout(command!);
       }
-      if (mounted) setState(() => _command = command);
+      if (mounted) {
+        setState(() {
+          _command = command;
+          _checkpoint = checkpoint;
+        });
+      }
     } on Object {
       if (command != null) {
         try {
@@ -254,6 +265,18 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         autoStartDeviceLogin: true,
         onDeviceLoginFinished: (event, status) =>
             _completeDeviceLoginOutcome(command, event, status),
+      );
+    }
+    if (switch (command.scenario) {
+      EvidenceScenario.interruptAfterRefreshRisk ||
+      EvidenceScenario.interruptBeforeReplacementCommit ||
+      EvidenceScenario.interruptAfterReplacementCommit => true,
+      _ => false,
+    }) {
+      return EvidenceInterruptionScenarioApp(
+        command: command,
+        stateStore: _stateStore,
+        checkpoint: _checkpoint,
       );
     }
     if (command.scenario == EvidenceScenario.exactModels) {

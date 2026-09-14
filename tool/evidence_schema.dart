@@ -168,6 +168,13 @@ final class EvidenceSchema {
     if (!_rawPredicates(value['predicates'])) {
       return RawEvidenceRejection.predicates;
     }
+    if (value['state'] == 'pass' &&
+        !_rawPassPredicates(
+          scenario,
+          Map<String, Object?>.from(value['predicates']! as Map),
+        )) {
+      return RawEvidenceRejection.predicates;
+    }
     if (value['category'] != null &&
         !_errorCategories.contains(value['category'])) {
       return RawEvidenceRejection.category;
@@ -233,6 +240,123 @@ final class EvidenceSchema {
           (entry.value is bool || entry.value is int),
     );
   }
+
+  static bool _rawPassPredicates(
+    String scenario,
+    Map<String, Object?> predicates,
+  ) {
+    final expected = _rawPassValues[scenario];
+    if (expected == null || predicates.keys.toSet().length != expected.length) {
+      return false;
+    }
+    return expected.entries.every(
+      (entry) => predicates[entry.key] == entry.value,
+    );
+  }
+
+  static const _rawPassValues = <String, Map<String, Object>>{
+    'approved-login': {
+      'promptCleared': true,
+      'approvalCompleted': true,
+      'commitAcknowledged': true,
+    },
+    'cancel-login': {
+      'promptCleared': true,
+      'cancellationObserved': true,
+      'credentialWriteCount': 0,
+      'zeroProtectedIo': true,
+    },
+    'declined-login': {
+      'promptCleared': true,
+      'declinedOrExpired': true,
+      'credentialWriteCount': 0,
+      'zeroProtectedIo': true,
+    },
+    'expired-login': {
+      'promptCleared': true,
+      'declinedOrExpired': true,
+      'credentialWriteCount': 0,
+      'zeroProtectedIo': true,
+    },
+    'rehydrate-after-resume': {
+      'graphChanged': true,
+      'recoveryResolved': true,
+      'freshClient': true,
+    },
+    'rehydrate-after-process-death': {
+      'graphChanged': true,
+      'recoveryResolved': true,
+      'freshClient': true,
+    },
+    'two-client-rotation': {
+      'refreshCount': 1,
+      'rotationObserved': true,
+      'bothComplete': true,
+      'noOverlapViolation': true,
+      'freshClient': true,
+    },
+    'interrupt-after-refresh-risk': {
+      'refreshRiskAcknowledged': true,
+      'processChanged': true,
+      'oldStateCleared': true,
+      'zeroProtectedIoBeforeResolution': true,
+      'reauthenticated': true,
+      'freshClient': true,
+    },
+    'interrupt-before-replacement-commit': {
+      'refreshResponseCount': 1,
+      'refreshRiskAcknowledged': true,
+      'replacementNotAcknowledged': true,
+      'processChanged': true,
+      'oldStateCleared': true,
+      'zeroProtectedIoBeforeResolution': true,
+      'reauthenticated': true,
+      'freshClient': true,
+    },
+    'interrupt-after-replacement-commit': {
+      'refreshResponseCount': 1,
+      'replacementAcknowledged': true,
+      'operationSuccessNotReported': true,
+      'processChanged': true,
+      'replacementGenerationVerified': true,
+      'resolvedBeforeProtectedIo': true,
+      'freshClient': true,
+    },
+    'invalid-grant': {
+      'refreshCount': 1,
+      'cleanupAcknowledged': true,
+      'zeroProtectedIoBeforeReauthentication': true,
+      'reauthenticated': true,
+      'freshClient': true,
+    },
+    'expired-without-refresh': {
+      'seedAcknowledged': true,
+      'zeroProtectedIo': true,
+      'cleanupAcknowledged': true,
+      'reauthenticated': true,
+      'freshClient': true,
+    },
+    'malformed-store': {
+      'seedAcknowledged': true,
+      'zeroProtectedIo': true,
+      'cleanupAcknowledged': true,
+      'reauthenticated': true,
+      'freshClient': true,
+    },
+    'unavailable-tuple': {
+      'catalogCount': 1,
+      'allAdmitted': true,
+      'unavailableRejected': true,
+      'zeroResponses': true,
+    },
+    'exact-models': {'catalogCount': 1},
+    'redirect-matrix': {'redirectCaseCount': 25},
+    'local-logout': {
+      'clearAcknowledged': true,
+      'signedOut': true,
+      'noRemoteRevocation': true,
+    },
+  };
 
   static void _rows(List<Object?> rows) {
     if (rows.length != rowIds.length) _fail();

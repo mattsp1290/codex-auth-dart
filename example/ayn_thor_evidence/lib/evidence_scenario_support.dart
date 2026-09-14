@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:codex_auth/codex_auth.dart';
 
 import 'credential_state_store.dart';
+import 'evidence_controls.dart';
+import 'evidence_state_store.dart';
 
 /// Evidence-only finite request counters and one-shot refresh substitution.
 /// Request values are never retained or rendered.
@@ -137,5 +140,128 @@ final class EvidenceCredentialMutation {
     } on FormatException {
       return null;
     }
+  }
+}
+
+final class PausingCredentialStore implements CredentialStore {
+  PausingCredentialStore(
+    this._inner, {
+    required this.stateStore,
+    required this.command,
+    required this.phase,
+  });
+
+  final CredentialStore _inner;
+  final EvidenceStateStore stateStore;
+  final EvidenceCommand command;
+  final EvidenceCheckpointPhase phase;
+
+  @override
+  Future<T> transaction<T>(
+    Future<T> Function(CredentialTransaction transaction) action, {
+    CancellationSignal? cancellation,
+  }) => _inner.transaction(
+    (transaction) => action(
+      _PausingTransaction(
+        transaction,
+        stateStore: stateStore,
+        command: command,
+        phase: phase,
+      ),
+    ),
+    cancellation: cancellation,
+  );
+}
+
+final class _PausingTransaction implements CredentialTransaction {
+  const _PausingTransaction(
+    this._inner, {
+    required this.stateStore,
+    required this.command,
+    required this.phase,
+  });
+
+  final CredentialTransaction _inner;
+  final EvidenceStateStore stateStore;
+  final EvidenceCommand command;
+  final EvidenceCheckpointPhase phase;
+
+  @override
+  bool get requiresReauthentication => _inner.requiresReauthentication;
+
+  @override
+  Future<void> clear() => _inner.clear();
+
+  @override
+  Future<void> clearAfterRefresh(String generation) =>
+      _inner.clearAfterRefresh(generation);
+
+  @override
+  Future<void> markRefreshRisk(String generation) async {
+    await _inner.markRefreshRisk(generation);
+    if (phase == EvidenceCheckpointPhase.refreshRisk) {
+      await _checkpoint(
+        refreshResponseCount: 0,
+        replacementAcknowledged: false,
+        replacementGenerationVerified: false,
+      );
+    }
+  }
+
+  @override
+  Future<String?> read() => _inner.read();
+
+  @override
+  Future<void> replace(String record) => _inner.replace(record);
+
+  @override
+  Future<void> replaceAfterRefresh(String generation, String record) async {
+    if (phase == EvidenceCheckpointPhase.beforeReplacement) {
+      await _checkpoint(
+        refreshResponseCount: 1,
+        replacementAcknowledged: false,
+        replacementGenerationVerified: false,
+      );
+    }
+    await _inner.replaceAfterRefresh(generation, record);
+    if (phase == EvidenceCheckpointPhase.afterReplacement) {
+      await _checkpoint(
+        refreshResponseCount: 1,
+        replacementAcknowledged: true,
+        replacementGenerationVerified: _replacementDiffers(generation, record),
+      );
+    }
+  }
+
+  @override
+  Future<void> restoreAfterNotDispatched(String generation) =>
+      _inner.restoreAfterNotDispatched(generation);
+
+  bool _replacementDiffers(String generation, String record) {
+    try {
+      final value = jsonDecode(record);
+      return value is Map &&
+          value['generation'] is String &&
+          value['generation'] != generation;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  Future<Never> _checkpoint({
+    required int refreshResponseCount,
+    required bool replacementAcknowledged,
+    required bool replacementGenerationVerified,
+  }) async {
+    await stateStore.writeCheckpoint(
+      EvidenceCheckpoint(
+        command: command,
+        phase: phase,
+        refreshResponseCount: refreshResponseCount,
+        replacementAcknowledged: replacementAcknowledged,
+        replacementGenerationVerified: replacementGenerationVerified,
+      ),
+    );
+    return Completer<Never>().future;
   }
 }

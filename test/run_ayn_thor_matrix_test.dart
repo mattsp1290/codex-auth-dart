@@ -203,6 +203,50 @@ void main() {
     expect(adapter.calls, contains('removeReverse'));
     expect(fixture.closed, isTrue);
   });
+
+  test(
+    'interruption relaunch requires and records process replacement',
+    () async {
+      final adapter = FakeAdapterForCli(
+        commit: commit,
+        nonce: nonce,
+        processIdentities: <String>['first-process', 'second-process'],
+      );
+
+      await runAynThorMatrixEngine(
+        request: request(scenario: 'interrupt-after-refresh-risk'),
+        adapter: adapter,
+        reportProgress: (_) {},
+      );
+
+      expect(adapter.calls, containsAll(<String>['checkpoint', 'process']));
+      expect(adapter.calls.where((call) => call == 'launch'), hasLength(2));
+    },
+  );
+
+  test('interruption rejects a relaunch in the same process', () async {
+    final adapter = FakeAdapterForCli(
+      commit: commit,
+      nonce: nonce,
+      processIdentities: <String>['same-process', 'same-process'],
+    );
+
+    await expectLater(
+      runAynThorMatrixEngine(
+        request: request(scenario: 'interrupt-after-refresh-risk'),
+        adapter: adapter,
+        reportProgress: (_) {},
+      ),
+      throwsA(
+        isA<MatrixRunFailure>().having(
+          (failure) => failure.primaryStage,
+          'primaryStage',
+          MatrixStage.processRelaunch,
+        ),
+      ),
+    );
+    expect(adapter.calls, contains('clear'));
+  });
 }
 
 final class FakeAdapterForCli implements AynThorMatrixAdapter {
@@ -217,9 +261,11 @@ final class FakeAdapterForCli implements AynThorMatrixAdapter {
     this.failRemoveReverse = false,
     this.failWriteAfterSideEffect = false,
     this.failReverseAfterSideEffect = false,
+    List<String>? processIdentities,
     MatrixRedirectFixture? fixture,
   }) : rawResult = invalidResult ? '{}' : rawResult,
        failClearCall = failFinalClear ? 2 : failClearCall,
+       processIdentities = processIdentities ?? <String>['process'],
        fixture = fixture ?? _FakeFixture();
 
   final String commit;
@@ -231,6 +277,7 @@ final class FakeAdapterForCli implements AynThorMatrixAdapter {
   final bool failWriteAfterSideEffect;
   final bool failReverseAfterSideEffect;
   final MatrixRedirectFixture fixture;
+  final List<String> processIdentities;
   final calls = <String>[];
   var _clearCalls = 0;
   var _scenario = 'local-logout';
@@ -288,6 +335,17 @@ final class FakeAdapterForCli implements AynThorMatrixAdapter {
   Future<void> launch() async => calls.add('launch');
 
   @override
+  Future<String> processIdentity(Duration timeout) async {
+    calls.add('process');
+    return processIdentities.removeAt(0);
+  }
+
+  @override
+  Future<void> waitForCheckpoint(Duration timeout) async {
+    calls.add('checkpoint');
+  }
+
+  @override
   Future<String> waitForResult(Duration timeout) async {
     calls.add('result');
     return rawResult ??
@@ -300,7 +358,7 @@ final class FakeAdapterForCli implements AynThorMatrixAdapter {
           'state': 'pass',
           'recovery': 'signed-out',
           'protectedIo': 0,
-          'predicates': <String, Object?>{},
+          'predicates': _passingPredicates(_scenario),
         });
   }
 
@@ -319,6 +377,23 @@ final class FakeAdapterForCli implements AynThorMatrixAdapter {
   @override
   Future<void> cleanupSettleDelay() async => calls.add('settle');
 }
+
+Map<String, Object?> _passingPredicates(String scenario) => switch (scenario) {
+  'interrupt-after-refresh-risk' => <String, Object?>{
+    'refreshRiskAcknowledged': true,
+    'processChanged': false,
+    'oldStateCleared': true,
+    'zeroProtectedIoBeforeResolution': true,
+    'reauthenticated': true,
+    'freshClient': true,
+  },
+  'local-logout' => <String, Object?>{
+    'clearAcknowledged': true,
+    'signedOut': true,
+    'noRemoteRevocation': true,
+  },
+  _ => <String, Object?>{},
+};
 
 final class _FakeFixture implements MatrixRedirectFixture {
   _FakeFixture({this.failClose = false});

@@ -1,11 +1,17 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:ayn_thor_evidence/credential_state_store.dart';
+import 'package:ayn_thor_evidence/evidence_controls.dart';
 import 'package:ayn_thor_evidence/evidence_scenario_support.dart';
+import 'package:ayn_thor_evidence/evidence_state_store.dart';
 import 'package:codex_auth/codex_auth.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('expired and malformed seeds recover before protected I/O', () async {
     for (final seed in <Future<void> Function(CredentialStateStore)>[
       EvidenceCredentialMutation.seedExpiredWithoutRefresh,
@@ -71,6 +77,72 @@ void main() {
       expect(inner.secondContainedOriginal, isTrue);
     },
   );
+
+  test('pause checkpoints stay on the requested side of replacement', () async {
+    const channel = MethodChannel('codex_auth/evidence_state_v1');
+    EvidenceCheckpoint? checkpoint;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'writeCheckpoint') {
+            final arguments = Map<String, Object?>.from(call.arguments as Map);
+            checkpoint = EvidenceCheckpoint.decode(
+              arguments['checkpoint']! as String,
+            );
+            return true;
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    final command = EvidenceCommand.decode(
+      jsonEncode(<String, Object?>{
+        'schemaVersion': 1,
+        'scenario': 'interrupt-after-refresh-risk',
+        'packageCommit': 'a' * 40,
+        'flavor': 'evidence',
+        'nonce': 'b' * 64,
+      }),
+    );
+
+    for (final phase in EvidenceCheckpointPhase.values) {
+      checkpoint = null;
+      final inner = _MemoryStore();
+      final store = PausingCredentialStore(
+        inner,
+        stateStore: const EvidenceStateStore(
+          channel: channel,
+          expectedPackageCommit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          expectedFlavor: 'evidence',
+        ),
+        command: command,
+        phase: phase,
+      );
+      unawaited(
+        store.transaction((transaction) async {
+          await transaction.markRefreshRisk('old-generation-0001');
+          await transaction.replaceAfterRefresh(
+            'old-generation-0001',
+            jsonEncode(<String, Object?>{'generation': 'new-generation-0002'}),
+          );
+        }),
+      );
+      for (var attempt = 0; attempt < 20 && checkpoint == null; attempt++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      expect(checkpoint?.phase, phase);
+      expect(
+        inner.memoryTransaction.value?.contains('new-generation-0002'),
+        phase == EvidenceCheckpointPhase.afterReplacement,
+      );
+      expect(
+        checkpoint?.replacementAcknowledged,
+        phase == EvidenceCheckpointPhase.afterReplacement,
+      );
+    }
+  });
 }
 
 final class _Driver implements DurableRecordDriver {
@@ -121,4 +193,43 @@ final class _CapturingTransport implements HttpTransport {
       const Stream<List<int>>.empty(),
     );
   }
+}
+
+final class _MemoryStore implements CredentialStore {
+  final memoryTransaction = _MemoryTransaction();
+
+  @override
+  Future<T> transaction<T>(
+    Future<T> Function(CredentialTransaction transaction) action, {
+    CancellationSignal? cancellation,
+  }) => action(memoryTransaction);
+}
+
+final class _MemoryTransaction implements CredentialTransaction {
+  String? value = 'old-record';
+
+  @override
+  bool get requiresReauthentication => false;
+
+  @override
+  Future<void> clear() async => value = null;
+
+  @override
+  Future<void> clearAfterRefresh(String generation) async => value = null;
+
+  @override
+  Future<void> markRefreshRisk(String generation) async {}
+
+  @override
+  Future<String?> read() async => value;
+
+  @override
+  Future<void> replace(String record) async => value = record;
+
+  @override
+  Future<void> replaceAfterRefresh(String generation, String record) async =>
+      value = record;
+
+  @override
+  Future<void> restoreAfterNotDispatched(String generation) async {}
 }
