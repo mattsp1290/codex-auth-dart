@@ -146,7 +146,7 @@ final class DartIoHttpTransport implements HttpTransport {
       return HttpResponseData(
         response.statusCode,
         headers,
-        _boundedBody(response, deadline, closeOwned),
+        _boundedBody(response, deadline, closeOwned, cancellation),
         close: closeOwned,
       );
     } on OperationCancelled {
@@ -229,6 +229,7 @@ final class DartIoHttpTransport implements HttpTransport {
     Stream<List<int>> source,
     DateTime overallDeadline,
     Future<void> Function() closeOwned,
+    CancellationSignal? cancellation,
   ) {
     late StreamController<List<int>> controller;
     StreamSubscription<List<int>>? subscription;
@@ -290,6 +291,13 @@ final class DartIoHttpTransport implements HttpTransport {
             unawaited(controller.close());
           },
         );
+        if (cancellation != null) {
+          unawaited(
+            cancellation.whenCancelled.then<void>(
+              (_) => fail(HttpTransportOutcome.cancelled),
+            ),
+          );
+        }
       },
       onPause: () => subscription?.pause(),
       onResume: () => subscription?.resume(),

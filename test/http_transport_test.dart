@@ -169,4 +169,54 @@ void main() {
       ),
     );
   });
+
+  test('cancellation remains active after response headers', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final release = Completer<void>();
+    server.listen((request) async {
+      await request.drain<void>();
+      request.response.write(<int>[1]);
+      await request.response.flush();
+      await release.future;
+      await request.response.close();
+    });
+    addTearDown(() async {
+      if (!release.isCompleted) release.complete();
+      await server.close(force: true);
+    });
+    final cancellation = CancellationController();
+    final transport = DartIoHttpTransport(
+      streamIdleTimeout: const Duration(seconds: 1),
+      overallTimeout: const Duration(seconds: 2),
+    );
+    addTearDown(() => transport.close(force: true));
+    final response = await transport.send(
+      HttpRequestData(
+        method: 'GET',
+        uri: Uri.parse(
+          'http://${server.address.address}:${server.port}/cancel-body',
+        ),
+      ),
+      cancellation: cancellation,
+    );
+    final drained = response.body.drain<void>();
+    cancellation.cancel();
+
+    await expectLater(
+      drained,
+      throwsA(
+        isA<HttpTransportException>()
+            .having(
+              (error) => error.phase,
+              'phase',
+              HttpDispatchPhase.possiblyDispatched,
+            )
+            .having(
+              (error) => error.outcome,
+              'outcome',
+              HttpTransportOutcome.cancelled,
+            ),
+      ),
+    );
+  });
 }
