@@ -26,6 +26,7 @@ void main() {
       ],
       environment: const <String, String>{'ANDROID_SERIAL': 'selected'},
       adapterFactory: (_, _) => FakeAdapterForCli(commit: 'a' * 40),
+      artifactValidator: (_, _) async {},
       stdoutSink: out,
       stderrSink: err,
     );
@@ -62,6 +63,7 @@ void main() {
           invalidResult: true,
           failFinalClear: true,
         ),
+        artifactValidator: (_, _) async {},
         stdoutSink: out,
         stderrSink: err,
       );
@@ -76,6 +78,43 @@ void main() {
         err.toString(),
         contains('matrix runner cleanup incomplete at cleanup-clear'),
       );
+    },
+  );
+
+  test(
+    'CLI rejects a substituted APK before constructing an adapter',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('matrix-cli-');
+      addTearDown(() => directory.delete(recursive: true));
+      final apk = File('${directory.path}/candidate.apk');
+      await apk.writeAsBytes(<int>[1, 2, 3]);
+      final out = StringBuffer();
+      final err = StringBuffer();
+      var adapterConstructed = false;
+
+      final code = await runner.runMatrixCli(
+        <String>[
+          '--package-commit',
+          'a' * 40,
+          '--apk',
+          apk.path,
+          '--scenario',
+          'approved-login',
+        ],
+        environment: const <String, String>{'ANDROID_SERIAL': 'selected'},
+        adapterFactory: (_, _) {
+          adapterConstructed = true;
+          return FakeAdapterForCli(commit: 'a' * 40);
+        },
+        artifactValidator: (_, _) async => throw StateError('substituted'),
+        stdoutSink: out,
+        stderrSink: err,
+      );
+
+      expect(code, 1);
+      expect(adapterConstructed, isFalse);
+      expect(out.toString(), isEmpty);
+      expect(err.toString(), contains('rejected at artifact-provenance'));
     },
   );
 }

@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart';
 import 'src/ayn_thor_matrix_adapter.dart';
 import 'src/ayn_thor_matrix_engine.dart';
 import 'src/bounded_process_executor.dart';
+import 'src/release_artifact_verifier.dart';
 
 const _package = 'com.mattsp1290.codexauth.ayn_thor_evidence.evidence';
 const _scenarios = <String>{
@@ -49,10 +50,15 @@ typedef MatrixAdapterFactory = AynThorMatrixAdapter Function(
   String serial,
   String apk,
 );
+typedef EvidenceArtifactValidator = Future<void> Function(
+  String packageCommit,
+  String apk,
+);
 
 Future<int> runMatrixCli(
   List<String> arguments, {
   MatrixAdapterFactory? adapterFactory,
+  EvidenceArtifactValidator? artifactValidator,
   Map<String, String>? environment,
   StringSink? stdoutSink,
   StringSink? stderrSink,
@@ -61,6 +67,17 @@ Future<int> runMatrixCli(
   final err = stderrSink ?? stderr;
   try {
     final options = _Options.parse(arguments);
+    err.writeln('matrix runner stage ${MatrixStage.artifactProvenance.label}');
+    try {
+      await (artifactValidator ?? verifyEvidenceArtifact)(
+        options.packageCommit,
+        options.apk,
+      );
+    } on Object {
+      throw const MatrixRunFailure(
+        primaryStage: MatrixStage.artifactProvenance,
+      );
+    }
     err.writeln('matrix runner stage ${MatrixStage.deviceSelection.label}');
     final serial = (environment ?? Platform.environment)['ANDROID_SERIAL'];
     if (serial == null || serial.isEmpty) {

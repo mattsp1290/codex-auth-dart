@@ -4,6 +4,7 @@ import '../evidence_schema.dart';
 
 enum MatrixStage {
   arguments('arguments'),
+  artifactProvenance('artifact-provenance'),
   deviceSelection('device-selection'),
   physicalDevice('physical-device'),
   install('install'),

@@ -3,6 +3,7 @@ package com.mattsp1290.codexauth.ayn_thor_evidence
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.util.concurrent.Executors
 
 /** Evidence-only private command/result bridge. No intent extras are accepted. */
 class EvidenceActivity : MainActivity() {
@@ -10,25 +11,33 @@ class EvidenceActivity : MainActivity() {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "codex_auth/evidence_state_v1")
             .setMethodCallHandler { call, result ->
-                try {
-                    when (call.method) {
-                        "consumeCommand" -> result.success(consumeCommand())
-                        "writeResult" -> {
-                            val raw = call.argument<String>("result")
-                            if (raw == null || raw.length > maxChars) result.error("invalid", null, null)
-                            else result.success(writeResult(raw))
+                executor.execute {
+                    try {
+                        val value: Any? = when (call.method) {
+                            "consumeCommand" -> consumeCommand()
+                            "writeResult" -> {
+                                val raw = call.argument<String>("result")
+                                if (raw == null || raw.length > maxChars) throw IllegalArgumentException()
+                                writeResult(raw)
+                            }
+                            "readCheckpoint" -> readCheckpoint()
+                            "writeCheckpoint" -> {
+                                val raw = call.argument<String>("checkpoint")
+                                if (raw == null || raw.length > maxChars) throw IllegalArgumentException()
+                                writeCheckpoint(raw)
+                            }
+                            "clearCheckpoint" -> clearCheckpoint()
+                            else -> null
                         }
-                        "readCheckpoint" -> result.success(readCheckpoint())
-                        "writeCheckpoint" -> {
-                            val raw = call.argument<String>("checkpoint")
-                            if (raw == null || raw.length > maxChars) result.error("invalid", null, null)
-                            else result.success(writeCheckpoint(raw))
+                        runOnUiThread {
+                            if (call.method !in methods) result.notImplemented()
+                            else result.success(value)
                         }
-                        "clearCheckpoint" -> result.success(clearCheckpoint())
-                        else -> result.notImplemented()
+                    } catch (_: IllegalArgumentException) {
+                        runOnUiThread { result.error("invalid", null, null) }
+                    } catch (_: Exception) {
+                        runOnUiThread { result.error("state", null, null) }
                     }
-                } catch (_: Exception) {
-                    result.error("state", null, null)
                 }
             }
     }
@@ -77,5 +86,13 @@ class EvidenceActivity : MainActivity() {
         private const val resultName = "evidence-result.json"
         private const val checkpointName = "evidence-checkpoint.json"
         private const val maxChars = 32768
+        private val methods = setOf(
+            "consumeCommand",
+            "writeResult",
+            "readCheckpoint",
+            "writeCheckpoint",
+            "clearCheckpoint",
+        )
+        private val executor = Executors.newSingleThreadExecutor()
     }
 }

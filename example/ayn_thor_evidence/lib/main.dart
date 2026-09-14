@@ -8,6 +8,9 @@ import 'build_provenance.dart';
 import 'evidence_controller.dart';
 import 'secure_credential_store.dart';
 
+bool shouldRebuildGraphOnResume(bool wasBackgrounded, EvidenceState state) =>
+    wasBackgrounded && state != EvidenceState.waitingForApproval;
+
 void main() => runApp(const EvidenceHostApp());
 
 /// Ordinary host entrypoint. It deliberately imports no evidence controls.
@@ -82,6 +85,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
   var _automaticLoginStarted = false;
   var _automaticModelsStarted = false;
   var _automaticCatalogStarted = false;
+  var _wasBackgrounded = false;
 
   @override
   void initState() {
@@ -145,7 +149,19 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _wasBackgrounded = true;
+      return;
+    }
     if (state != AppLifecycleState.resumed) return;
+    final rebuild = shouldRebuildGraphOnResume(
+      _wasBackgrounded,
+      _controller.state,
+    );
+    _wasBackgrounded = false;
+    if (!rebuild) return;
     _controller.removeListener(_changed);
     _controller.cancel();
     _rebuildGraph();
