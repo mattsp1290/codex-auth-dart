@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'build_provenance.dart';
 import 'evidence_controller.dart';
 import 'evidence_controls.dart';
+import 'evidence_recovery_scenarios.dart';
 import 'evidence_state_store.dart';
 import 'main.dart';
 import 'redirect_evidence.dart';
@@ -281,6 +282,18 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
       unawaited(_runRedirectMatrix(command));
       return const MaterialApp(
         home: Scaffold(body: Center(child: Text('Running redirect evidence'))),
+      );
+    }
+    if (switch (command.scenario) {
+      EvidenceScenario.twoClientRotation ||
+      EvidenceScenario.invalidGrant ||
+      EvidenceScenario.expiredWithoutRefresh ||
+      EvidenceScenario.malformedStore => true,
+      _ => false,
+    }) {
+      return EvidenceRecoveryScenarioApp(
+        command: command,
+        stateStore: _stateStore,
       );
     }
     return MaterialApp(home: _EvidenceLanding(command: command));
