@@ -41,6 +41,7 @@ final class EvidenceController {
   CancellationController? _cancellation;
 
   EvidenceState state = EvidenceState.idle;
+  bool pollLoopActive = false;
   DeviceLoginPrompt? prompt;
   EvidenceEvent event = const EvidenceEvent('device-login', EvidenceState.idle);
   final Map<String, TupleEvidenceState> tupleStates =
@@ -67,6 +68,10 @@ final class EvidenceController {
         onPrompt: (nextPrompt) {
           prompt = nextPrompt;
           state = EvidenceState.waitingForApproval;
+          // The login future continues into its server-paced polling loop as
+          // soon as this callback returns. Keep that independent activity
+          // visible even before the first poll response arrives.
+          pollLoopActive = true;
           event = const EvidenceEvent(
             'device-login',
             EvidenceState.waitingForApproval,
@@ -90,6 +95,7 @@ final class EvidenceController {
         category: error.category,
       );
     } finally {
+      pollLoopActive = false;
       _notify();
     }
     return event;

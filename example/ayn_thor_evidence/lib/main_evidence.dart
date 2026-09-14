@@ -125,71 +125,89 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     EvidenceEvent event,
     AuthStatus status,
   ) async {
-    var freshClient = false;
-    if (command.scenario == EvidenceScenario.approvedLogin &&
-        event.state == EvidenceState.passed &&
-        status == AuthStatus.signedIn) {
-      freshClient = (await EvidenceController(
-        CodexAuthClient(
-          CodexAuthOptions(
-            store: SecureCredentialStore(),
-            transport: DartIoHttpTransport(),
+    try {
+      var freshClient = false;
+      if (command.scenario == EvidenceScenario.approvedLogin &&
+          event.state == EvidenceState.passed &&
+          status == AuthStatus.signedIn) {
+        freshClient = (await EvidenceController(
+          CodexAuthClient(
+            CodexAuthOptions(
+              store: SecureCredentialStore(),
+              transport: DartIoHttpTransport(),
+            ),
           ),
+        ).verifyCatalogAndUnavailable()).allRequiredAdmitted;
+      }
+      final passed = switch (command.scenario) {
+        EvidenceScenario.approvedLogin =>
+          event.state == EvidenceState.passed &&
+              status == AuthStatus.signedIn &&
+              freshClient,
+        EvidenceScenario.cancelLogin => event.state == EvidenceState.cancelled,
+        EvidenceScenario.declinedLogin =>
+          event.category == CodexAuthErrorCategory.deviceAuthorizationDeclined,
+        EvidenceScenario.expiredLogin =>
+          event.category == CodexAuthErrorCategory.deviceAuthorizationExpired,
+        _ => false,
+      };
+      await _stateStore.writeResult(
+        EvidenceResult(
+          command: command,
+          state: passed ? EvidenceResultState.pass : EvidenceResultState.fail,
+          recovery: status == AuthStatus.signedIn
+              ? EvidenceRecovery.signedIn
+              : EvidenceRecovery.signedOut,
+          protectedIo:
+              command.scenario == EvidenceScenario.approvedLogin && freshClient
+              ? 1
+              : 0,
+          category: event.state == EvidenceState.cancelled
+              ? CodexAuthErrorCategory.cancelled.name
+              : event.category?.name,
+          predicates: <String, Object?>{
+            'promptCleared': event.state != EvidenceState.waitingForApproval,
+            if (command.scenario == EvidenceScenario.approvedLogin)
+              'approvalCompleted': event.state == EvidenceState.passed,
+            if (command.scenario == EvidenceScenario.approvedLogin)
+              'commitAcknowledged': status == AuthStatus.signedIn,
+            if (command.scenario == EvidenceScenario.approvedLogin)
+              'freshClient': freshClient,
+            if (command.scenario == EvidenceScenario.cancelLogin)
+              'cancellationObserved': event.state == EvidenceState.cancelled,
+            if (command.scenario == EvidenceScenario.cancelLogin)
+              'credentialWriteCount': 0,
+            if (command.scenario == EvidenceScenario.cancelLogin)
+              'zeroProtectedIo': true,
+            if (command.scenario == EvidenceScenario.declinedLogin ||
+                command.scenario == EvidenceScenario.expiredLogin)
+              'declinedOrExpired': passed,
+            if (command.scenario == EvidenceScenario.declinedLogin ||
+                command.scenario == EvidenceScenario.expiredLogin)
+              'credentialWriteCount': 0,
+            if (command.scenario == EvidenceScenario.declinedLogin ||
+                command.scenario == EvidenceScenario.expiredLogin)
+              'zeroProtectedIo': true,
+          },
         ),
-      ).verifyCatalogAndUnavailable()).allRequiredAdmitted;
-    }
-    final passed = switch (command.scenario) {
-      EvidenceScenario.approvedLogin =>
-        event.state == EvidenceState.passed &&
-            status == AuthStatus.signedIn &&
-            freshClient,
-      EvidenceScenario.cancelLogin => event.state == EvidenceState.cancelled,
-      EvidenceScenario.declinedLogin =>
-        event.category == CodexAuthErrorCategory.deviceAuthorizationDeclined,
-      EvidenceScenario.expiredLogin =>
-        event.category == CodexAuthErrorCategory.deviceAuthorizationExpired,
-      _ => false,
-    };
-    await _stateStore.writeResult(
-      EvidenceResult(
-        command: command,
-        state: passed ? EvidenceResultState.pass : EvidenceResultState.fail,
-        recovery: status == AuthStatus.signedIn
-            ? EvidenceRecovery.signedIn
-            : EvidenceRecovery.signedOut,
-        protectedIo:
-            command.scenario == EvidenceScenario.approvedLogin && freshClient
-            ? 1
-            : 0,
-        category: event.state == EvidenceState.cancelled
-            ? CodexAuthErrorCategory.cancelled.name
-            : event.category?.name,
-        predicates: <String, Object?>{
-          'promptCleared': event.state != EvidenceState.waitingForApproval,
-          if (command.scenario == EvidenceScenario.approvedLogin)
+      );
+    } on Object {
+      await _stateStore.writeResult(
+        EvidenceResult(
+          command: command,
+          state: EvidenceResultState.fail,
+          recovery: status == AuthStatus.signedIn
+              ? EvidenceRecovery.signedIn
+              : EvidenceRecovery.cleanupRequired,
+          protectedIo: 0,
+          category: 'requestFailed',
+          predicates: <String, Object?>{
             'approvalCompleted': event.state == EvidenceState.passed,
-          if (command.scenario == EvidenceScenario.approvedLogin)
             'commitAcknowledged': status == AuthStatus.signedIn,
-          if (command.scenario == EvidenceScenario.approvedLogin)
-            'freshClient': freshClient,
-          if (command.scenario == EvidenceScenario.cancelLogin)
-            'cancellationObserved': event.state == EvidenceState.cancelled,
-          if (command.scenario == EvidenceScenario.cancelLogin)
-            'credentialWriteCount': 0,
-          if (command.scenario == EvidenceScenario.cancelLogin)
-            'zeroProtectedIo': true,
-          if (command.scenario == EvidenceScenario.declinedLogin ||
-              command.scenario == EvidenceScenario.expiredLogin)
-            'declinedOrExpired': passed,
-          if (command.scenario == EvidenceScenario.declinedLogin ||
-              command.scenario == EvidenceScenario.expiredLogin)
-            'credentialWriteCount': 0,
-          if (command.scenario == EvidenceScenario.declinedLogin ||
-              command.scenario == EvidenceScenario.expiredLogin)
-            'zeroProtectedIo': true,
-        },
-      ),
-    );
+          },
+        ),
+      );
+    }
   }
 
   Future<void> _completeExactModels(
@@ -292,7 +310,9 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         autoStartDeviceLogin: true,
         clientFactory: _deviceAuthClient,
         statusDetail:
-            'Polls: ${_deviceAuthTelemetry.pollCount}; '
+            'Poll attempts: ${_deviceAuthTelemetry.attemptsStarted}; '
+            'completed: ${_deviceAuthTelemetry.attemptsCompleted}; '
+            'in flight: ${_deviceAuthTelemetry.inFlight}; '
             'last status: ${_deviceAuthTelemetry.lastStatus ?? 0}',
         onDeviceLoginFinished: (event, status) =>
             _completeDeviceLoginOutcome(command, event, status),

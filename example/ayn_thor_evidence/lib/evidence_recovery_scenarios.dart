@@ -10,6 +10,16 @@ import 'evidence_scenario_support.dart';
 import 'evidence_state_store.dart';
 import 'secure_credential_store.dart';
 
+final class _ReauthenticationOutcome {
+  const _ReauthenticationOutcome({
+    required this.loginCommitted,
+    required this.freshClient,
+  });
+
+  final bool loginCommitted;
+  final bool freshClient;
+}
+
 /// Evidence-only orchestration for recovery rows that are absent from the
 /// ordinary application graph.
 final class EvidenceRecoveryScenarioApp extends StatefulWidget {
@@ -140,7 +150,13 @@ final class _EvidenceRecoveryScenarioAppState
     ).status();
     cleanupAcknowledged =
         cleanupAcknowledged && recovered != AuthStatus.signedIn;
-    final freshClient = cleanupAcknowledged && await _reauthenticateAndProbe();
+    final reauthentication = cleanupAcknowledged
+        ? await _reauthenticateAndProbe()
+        : const _ReauthenticationOutcome(
+            loginCommitted: false,
+            freshClient: false,
+          );
+    final freshClient = reauthentication.freshClient;
     final passed =
         staleAcknowledged &&
         transport.refreshCount == 1 &&
@@ -158,49 +174,77 @@ final class _EvidenceRecoveryScenarioAppState
         'refreshCount': transport.refreshCount,
         'cleanupAcknowledged': cleanupAcknowledged,
         'zeroProtectedIoBeforeReauthentication': transport.protectedIo == 0,
-        'reauthenticated': freshClient,
+        'reauthenticated': reauthentication.loginCommitted,
         'freshClient': freshClient,
       },
     );
   }
 
   Future<void> _runSeedRecovery({required bool expired}) async {
-    final state = SecureCredentialStore();
-    if (expired) {
-      await EvidenceCredentialMutation.seedExpiredWithoutRefresh(state);
-    } else {
-      await EvidenceCredentialMutation.seedMalformed(state);
+    var seedAcknowledged = false;
+    var cleanupAcknowledged = false;
+    var reauthenticationCompleted = false;
+    var freshClient = false;
+    try {
+      final state = SecureCredentialStore();
+      if (expired) {
+        await EvidenceCredentialMutation.seedExpiredWithoutRefresh(state);
+      } else {
+        await EvidenceCredentialMutation.seedMalformed(state);
+      }
+      seedAcknowledged = true;
+      final transport = EvidenceTransport(DartIoHttpTransport());
+      final recovered = await CodexAuthClient(
+        CodexAuthOptions(store: state, transport: transport),
+      ).status();
+      cleanupAcknowledged = recovered == AuthStatus.reauthenticationRequired;
+      final reauthentication = cleanupAcknowledged
+          ? await _reauthenticateAndProbe()
+          : const _ReauthenticationOutcome(
+              loginCommitted: false,
+              freshClient: false,
+            );
+      reauthenticationCompleted = reauthentication.loginCommitted;
+      freshClient = reauthentication.freshClient;
+      final passed =
+          transport.refreshCount == 0 &&
+          transport.protectedIo == 0 &&
+          cleanupAcknowledged &&
+          freshClient;
+      await _write(
+        passed: passed,
+        recovery: freshClient
+            ? EvidenceRecovery.signedIn
+            : EvidenceRecovery.reauthenticationRequired,
+        protectedIo: transport.protectedIo,
+        predicates: <String, Object?>{
+          'seedAcknowledged': seedAcknowledged,
+          'zeroProtectedIo':
+              transport.refreshCount == 0 && transport.protectedIo == 0,
+          'cleanupAcknowledged': cleanupAcknowledged,
+          'reauthenticated': reauthenticationCompleted,
+          'freshClient': freshClient,
+        },
+      );
+    } on Object {
+      await _writeFailure(
+        recovery: reauthenticationCompleted
+            ? EvidenceRecovery.signedIn
+            : cleanupAcknowledged
+            ? EvidenceRecovery.reauthenticationRequired
+            : EvidenceRecovery.cleanupRequired,
+        predicates: <String, Object?>{
+          'seedAcknowledged': seedAcknowledged,
+          'cleanupAcknowledged': cleanupAcknowledged,
+          'zeroProtectedIo': true,
+          'reauthenticated': reauthenticationCompleted,
+          'freshClient': freshClient,
+        },
+      );
     }
-    final transport = EvidenceTransport(DartIoHttpTransport());
-    final recovered = await CodexAuthClient(
-      CodexAuthOptions(store: state, transport: transport),
-    ).status();
-    final cleanupAcknowledged =
-        recovered == AuthStatus.reauthenticationRequired;
-    final freshClient = cleanupAcknowledged && await _reauthenticateAndProbe();
-    final passed =
-        transport.refreshCount == 0 &&
-        transport.protectedIo == 0 &&
-        cleanupAcknowledged &&
-        freshClient;
-    await _write(
-      passed: passed,
-      recovery: freshClient
-          ? EvidenceRecovery.signedIn
-          : EvidenceRecovery.reauthenticationRequired,
-      protectedIo: transport.protectedIo,
-      predicates: <String, Object?>{
-        'seedAcknowledged': true,
-        'zeroProtectedIo':
-            transport.refreshCount == 0 && transport.protectedIo == 0,
-        'cleanupAcknowledged': cleanupAcknowledged,
-        'reauthenticated': freshClient,
-        'freshClient': freshClient,
-      },
-    );
   }
 
-  Future<bool> _reauthenticateAndProbe() async {
+  Future<_ReauthenticationOutcome> _reauthenticateAndProbe() async {
     final controller = EvidenceController(
       CodexAuthClient(
         CodexAuthOptions(
@@ -213,8 +257,13 @@ final class _EvidenceRecoveryScenarioAppState
     if (mounted) setState(() => _finiteState = 'reauthentication-required');
     final event = await controller.startDeviceLogin();
     final status = await controller.status();
-    if (event.state != EvidenceState.passed || status != AuthStatus.signedIn) {
-      return false;
+    final loginCommitted =
+        event.state == EvidenceState.passed && status == AuthStatus.signedIn;
+    if (!loginCommitted) {
+      return const _ReauthenticationOutcome(
+        loginCommitted: false,
+        freshClient: false,
+      );
     }
     final result = await EvidenceController(
       CodexAuthClient(
@@ -224,7 +273,10 @@ final class _EvidenceRecoveryScenarioAppState
         ),
       ),
     ).verifyCatalogAndUnavailable();
-    return result.allRequiredAdmitted;
+    return _ReauthenticationOutcome(
+      loginCommitted: true,
+      freshClient: result.allRequiredAdmitted,
+    );
   }
 
   Future<void> _write({
@@ -245,13 +297,17 @@ final class _EvidenceRecoveryScenarioAppState
     if (mounted) setState(() => _finiteState = passed ? 'passed' : 'failed');
   }
 
-  Future<void> _writeFailure() => widget.stateStore.writeResult(
+  Future<void> _writeFailure({
+    EvidenceRecovery recovery = EvidenceRecovery.cleanupRequired,
+    Map<String, Object?> predicates = const <String, Object?>{},
+  }) => widget.stateStore.writeResult(
     EvidenceResult(
       command: widget.command,
       state: EvidenceResultState.fail,
-      recovery: EvidenceRecovery.cleanupRequired,
+      recovery: recovery,
       protectedIo: 0,
       category: 'requestFailed',
+      predicates: predicates,
     ),
   );
 

@@ -96,6 +96,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
   var _automaticModelsStarted = false;
   var _automaticCatalogStarted = false;
   var _wasBackgrounded = false;
+  var _completionFailed = false;
 
   @override
   void initState() {
@@ -122,10 +123,19 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
   }
 
   Future<void> _runAutomaticDeviceLogin() async {
-    final event = await _controller.startDeviceLogin();
-    final status = await _controller.status();
-    await widget.onDeviceLoginFinished?.call(event, status);
-    if (mounted) setState(() => _durableStatus = status);
+    try {
+      final event = await _controller.startDeviceLogin();
+      final status = await _controller.status();
+      if (mounted) {
+        setState(() => _durableStatus = status);
+        // A result file allows the host runner to clean up immediately. Make
+        // the terminal state observable on screen before invoking that path.
+        await WidgetsBinding.instance.endOfFrame;
+      }
+      await widget.onDeviceLoginFinished?.call(event, status);
+    } on Object {
+      if (mounted) setState(() => _completionFailed = true);
+    }
   }
 
   Future<void> _readDurableStatus() async {
@@ -202,6 +212,11 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text('State: ${_controller.state.name} ($_durableStatus)'),
+            if (_controller.pollLoopActive)
+              const Text(
+                'Poll loop: active (approval may happen on another device)',
+              ),
+            if (_completionFailed) const Text('Completion: failed'),
             if (widget.statusDetail != null) Text(widget.statusDetail!),
             Text(
               'Build: ${BuildProvenance.packageCommit} (${BuildProvenance.flavor})',

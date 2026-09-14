@@ -135,11 +135,13 @@ void main() {
       final store = _Store();
       final cancellation = CancellationController();
       final promptShown = Completer<void>();
+      final pollingStarted = Completer<void>();
       final login =
           _client(
             store,
             transport,
             delay: (_, signal) async {
+              pollingStarted.complete();
               await signal!.whenCancelled;
               throwIfCancelled(signal);
             },
@@ -148,6 +150,7 @@ void main() {
             cancellation: cancellation,
           );
       await promptShown.future;
+      await pollingStarted.future;
       cancellation.cancel();
 
       await expectLater(login, throwsA(isA<OperationCancelled>()));
