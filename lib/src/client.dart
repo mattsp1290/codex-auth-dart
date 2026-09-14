@@ -81,10 +81,19 @@ final class CodexAuthClient {
       if (transaction.requiresReauthentication) {
         return AuthStatus.reauthenticationRequired;
       }
-      final raw = await transaction.read();
+      String? raw;
+      try {
+        raw = await transaction.read();
+      } on Object {
+        throw _cleanupRequired('status');
+      }
       if (raw == null) return AuthStatus.signedOut;
       if (decodeCredentials(raw) == null) {
-        await transaction.clear();
+        try {
+          await transaction.clear();
+        } on Object {
+          throw _cleanupRequired('status');
+        }
         return AuthStatus.reauthenticationRequired;
       }
       return AuthStatus.signedIn;
@@ -459,7 +468,11 @@ final class CodexAuthClient {
     CancellationSignal? signal,
     String operation,
   ) async {
-    await transaction.markRefreshRisk(old.generation);
+    try {
+      await transaction.markRefreshRisk(old.generation);
+    } on Object {
+      throw _cleanupRequired(operation);
+    }
     try {
       final response = await _transport.send(
         HttpRequestData(
@@ -526,8 +539,14 @@ final class CodexAuthClient {
         operation: 'refresh',
         requiresReauthentication: true,
       );
-    } on CodexAuthException {
-      rethrow;
+    } on CodexAuthException catch (error) {
+      if (error.requiresReauthentication || error.cleanupRequired) rethrow;
+      await _clearAfterRefresh(transaction, old.generation, operation);
+      throw CodexAuthException(
+        CodexAuthErrorCategory.reauthenticationRequired,
+        operation: operation,
+        requiresReauthentication: true,
+      );
     } on Object {
       // Refresh dispatch is ambiguous once transport may have started: fail closed.
       await _clearAfterRefresh(transaction, old.generation, operation);
@@ -603,11 +622,20 @@ final class CodexAuthClient {
         requiresReauthentication: true,
       );
     }
-    final raw = await transaction.read();
+    String? raw;
+    try {
+      raw = await transaction.read();
+    } on Object {
+      throw _cleanupRequired(operation);
+    }
     if (raw == null) return null;
     final credentials = decodeCredentials(raw);
     if (credentials == null) {
-      await transaction.clear();
+      try {
+        await transaction.clear();
+      } on Object {
+        throw _cleanupRequired(operation);
+      }
       throw CodexAuthException(
         CodexAuthErrorCategory.reauthenticationRequired,
         operation: operation,

@@ -81,6 +81,132 @@ Map<String, bool> _emptyShape() => <String, bool>{
   'refreshToken': false,
 };
 
+const _rowPassValues = <String, Map<String, Object>>{
+  'apk-device-provenance': {
+    'physicalDevice': true,
+    'digestEqual': true,
+    'embeddedCommitMatch': true,
+    'embeddedFlavorMatch': true,
+    'variantMatch': true,
+    'dartTargetMatch': true,
+    'applicationIdMatch': true,
+    'compiledFingerprintMatch': true,
+  },
+  'approved-login': {
+    'approvalCompleted': true,
+    'commitAcknowledged': true,
+    'promptCleared': true,
+    'freshClient': true,
+  },
+  'cancel-login': {
+    'cancellationObserved': true,
+    'credentialWriteCount': 0,
+    'promptCleared': true,
+    'zeroProtectedIo': true,
+  },
+  'expiry-decline': {
+    'declinedOrExpired': true,
+    'credentialWriteCount': 0,
+    'promptCleared': true,
+    'zeroProtectedIo': true,
+  },
+  'rehydrate-after-resume': {
+    'graphChanged': true,
+    'recoveryResolved': true,
+    'noLoginRepeated': true,
+    'resolvedBeforeProtectedIo': true,
+    'freshClient': true,
+  },
+  'rehydrate-after-process-death': {
+    'processChanged': true,
+    'recoveryResolved': true,
+    'noLoginRepeated': true,
+    'resolvedBeforeProtectedIo': true,
+    'freshClient': true,
+  },
+  'two-client-rotation': {
+    'refreshCount': 1,
+    'rotationObserved': true,
+    'bothComplete': true,
+    'noOverlapViolation': true,
+    'freshClient': true,
+  },
+  'interrupt-after-refresh-risk': {
+    'refreshRiskAcknowledged': true,
+    'processChanged': true,
+    'oldStateCleared': true,
+    'zeroProtectedIoBeforeResolution': true,
+    'reauthenticated': true,
+    'freshClient': true,
+  },
+  'interrupt-before-replacement-commit': {
+    'refreshResponseCount': 1,
+    'refreshRiskAcknowledged': true,
+    'replacementNotAcknowledged': true,
+    'processChanged': true,
+    'oldStateCleared': true,
+    'zeroProtectedIoBeforeResolution': true,
+    'reauthenticated': true,
+    'freshClient': true,
+  },
+  'interrupt-after-replacement-commit': {
+    'refreshResponseCount': 1,
+    'replacementAcknowledged': true,
+    'operationSuccessNotReported': true,
+    'processChanged': true,
+    'replacementGenerationVerified': true,
+    'resolvedBeforeProtectedIo': true,
+    'freshClient': true,
+  },
+  'invalid-grant': {
+    'refreshCount': 1,
+    'cleanupAcknowledged': true,
+    'zeroProtectedIoBeforeReauthentication': true,
+    'reauthenticated': true,
+    'freshClient': true,
+  },
+  'expired-without-refresh': {
+    'seedAcknowledged': true,
+    'zeroProtectedIo': true,
+    'cleanupAcknowledged': true,
+    'reauthenticated': true,
+    'freshClient': true,
+  },
+  'malformed-store': {
+    'seedAcknowledged': true,
+    'zeroProtectedIo': true,
+    'cleanupAcknowledged': true,
+    'reauthenticated': true,
+    'freshClient': true,
+  },
+  'catalog-and-unavailable': {
+    'catalogCount': 1,
+    'allAdmitted': true,
+    'unavailableRejected': true,
+    'zeroResponses': true,
+  },
+  'local-logout': {
+    'clearAcknowledged': true,
+    'signedOut': true,
+    'noRemoteRevocation': true,
+  },
+};
+
+Map<String, Object?> _passingRecord() {
+  final record = _record();
+  record['rows'] = EvidenceSchema.rowIds
+      .map(
+        (id) => <String, Object?>{
+          'id': id,
+          'state': 'pass',
+          'predicates': Map<String, Object>.from(_rowPassValues[id]!),
+          'hermeticTest': null,
+        },
+      )
+      .toList();
+  return record;
+}
+
 String _rawResult({required String nonce}) =>
     '''
 {"schemaVersion":1,"scenario":"local-logout","packageCommit":"${'a' * 40}","flavor":"evidence","nonce":"$nonce","state":"pass","recovery":"signed-out","protectedIo":0,"predicates":{"clearAcknowledged":true,"signedOut":true,"noRemoteRevocation":true}}
@@ -151,6 +277,26 @@ void main() {
       () => EvidenceSchema.validateRenderable(incomplete),
       throwsFormatException,
     );
+  });
+
+  test('rejects every independently falsified required row predicate', () {
+    expect(EvidenceSchema.validateRenderable(_passingRecord()), isNotNull);
+    for (final rowEntry in _rowPassValues.entries) {
+      for (final predicate in rowEntry.value.keys) {
+        final invalid = _passingRecord();
+        final rows = invalid['rows']! as List<Object?>;
+        final row = rows.cast<Map<String, Object?>>().singleWhere(
+          (candidate) => candidate['id'] == rowEntry.key,
+        );
+        final predicates = row['predicates']! as Map<String, Object?>;
+        predicates[predicate] = predicates[predicate] is int ? -1 : false;
+        expect(
+          () => EvidenceSchema.validateRenderable(invalid),
+          throwsFormatException,
+          reason: '${rowEntry.key}.$predicate must be enforced',
+        );
+      }
+    }
   });
 
   test('requires the exact hermetic test for safe non-inducible rows', () {
