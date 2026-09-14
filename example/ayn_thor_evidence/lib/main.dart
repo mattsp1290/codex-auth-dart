@@ -23,6 +23,8 @@ final class EvidenceHostApp extends StatelessWidget {
     this.onRequiredModelsFinished,
     this.autoRunCatalogEvidence = false,
     this.onCatalogEvidenceFinished,
+    this.clientFactory,
+    this.statusDetail,
   });
 
   final bool autoStartDeviceLogin;
@@ -37,6 +39,8 @@ final class EvidenceHostApp extends StatelessWidget {
   final bool autoRunCatalogEvidence;
   final Future<void> Function(AuthStatus status, CatalogEvidenceResult result)?
   onCatalogEvidenceFinished;
+  final CodexAuthClient Function()? clientFactory;
+  final String? statusDetail;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -48,6 +52,8 @@ final class EvidenceHostApp extends StatelessWidget {
       onRequiredModelsFinished: onRequiredModelsFinished,
       autoRunCatalogEvidence: autoRunCatalogEvidence,
       onCatalogEvidenceFinished: onCatalogEvidenceFinished,
+      clientFactory: clientFactory,
+      statusDetail: statusDetail,
     ),
   );
 }
@@ -60,6 +66,8 @@ final class _EvidenceHome extends StatefulWidget {
     required this.onRequiredModelsFinished,
     required this.autoRunCatalogEvidence,
     required this.onCatalogEvidenceFinished,
+    required this.clientFactory,
+    required this.statusDetail,
   });
   final bool autoStartDeviceLogin;
   final Future<void> Function(EvidenceEvent event, AuthStatus status)?
@@ -73,6 +81,8 @@ final class _EvidenceHome extends StatefulWidget {
   final bool autoRunCatalogEvidence;
   final Future<void> Function(AuthStatus status, CatalogEvidenceResult result)?
   onCatalogEvidenceFinished;
+  final CodexAuthClient Function()? clientFactory;
+  final String? statusDetail;
 
   @override
   State<_EvidenceHome> createState() => _EvidenceHomeState();
@@ -96,12 +106,13 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
 
   void _rebuildGraph() {
     _controller = EvidenceController(
-      CodexAuthClient(
-        CodexAuthOptions(
-          store: SecureCredentialStore(),
-          transport: DartIoHttpTransport(),
-        ),
-      ),
+      widget.clientFactory?.call() ??
+          CodexAuthClient(
+            CodexAuthOptions(
+              store: SecureCredentialStore(),
+              transport: DartIoHttpTransport(),
+            ),
+          ),
     )..addListener(_changed);
     unawaited(_readDurableStatus());
     if (widget.autoStartDeviceLogin && !_automaticLoginStarted) {
@@ -191,6 +202,7 @@ final class _EvidenceHomeState extends State<_EvidenceHome>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text('State: ${_controller.state.name} ($_durableStatus)'),
+            if (widget.statusDetail != null) Text(widget.statusDetail!),
             Text(
               'Build: ${BuildProvenance.packageCommit} (${BuildProvenance.flavor})',
             ),

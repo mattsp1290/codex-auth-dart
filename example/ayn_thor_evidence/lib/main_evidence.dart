@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'build_provenance.dart';
 import 'evidence_controller.dart';
 import 'evidence_controls.dart';
+import 'evidence_device_auth_transport.dart';
 import 'evidence_interruption_scenarios.dart';
 import 'evidence_rehydration_scenarios.dart';
 import 'evidence_recovery_scenarios.dart';
@@ -30,6 +31,20 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
   EvidenceCommand? _command;
   EvidenceCheckpoint? _checkpoint;
   var _invalidCommand = false;
+  final _deviceAuthTelemetry = DeviceAuthTelemetry();
+
+  CodexAuthClient _deviceAuthClient() => CodexAuthClient(
+    CodexAuthOptions(
+      store: SecureCredentialStore(),
+      transport: EvidenceDeviceAuthTransport(
+        DartIoHttpTransport(),
+        telemetry: _deviceAuthTelemetry,
+        onChanged: () {
+          if (mounted) setState(() {});
+        },
+      ),
+    ),
+  );
 
   @override
   void initState() {
@@ -275,6 +290,10 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     }) {
       return EvidenceHostApp(
         autoStartDeviceLogin: true,
+        clientFactory: _deviceAuthClient,
+        statusDetail:
+            'Polls: ${_deviceAuthTelemetry.pollCount}; '
+            'last status: ${_deviceAuthTelemetry.lastStatus ?? 0}',
         onDeviceLoginFinished: (event, status) =>
             _completeDeviceLoginOutcome(command, event, status),
       );
