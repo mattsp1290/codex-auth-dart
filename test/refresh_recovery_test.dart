@@ -489,10 +489,15 @@ void main() {
         ]);
       final transport = _Transport(responses);
       final client = await login(store, transport, () => now);
+      final oldGeneration =
+          (jsonDecode(store.value!) as Map<String, Object?>)['generation'];
       now = now.add(const Duration(minutes: 3));
       await client.listModels(const CatalogQuery('0.154.0'));
+      final newGeneration =
+          (jsonDecode(store.value!) as Map<String, Object?>)['generation'];
       expect(store.value, contains('first-refresh'));
       expect(store.value, contains('rotated-access'));
+      expect(newGeneration, isNot(oldGeneration));
       expect(store.risk, isNull);
     },
   );

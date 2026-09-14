@@ -502,7 +502,7 @@ final class CodexAuthClient {
       }
       final next = _credentialsFromTokenPayload(
         payload,
-        old.generation,
+        newCredentialGeneration(),
         old.accountId,
         false,
         fallbackRefreshToken: old.refreshToken,
