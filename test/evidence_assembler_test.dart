@@ -2,6 +2,7 @@ import 'package:test/test.dart';
 
 import '../tool/evidence_schema.dart';
 import '../tool/src/evidence_assembler.dart';
+import '../tool/src/evidence_renderer.dart';
 
 Map<String, Object?> _input() => <String, Object?>{
   'schemaVersion': 1,
@@ -81,6 +82,10 @@ void main() {
     expect(assembled['rows'], hasLength(EvidenceSchema.rowIds.length));
     expect(assembled['tuples'], hasLength(EvidenceSchema.tupleSlugs.length));
     expect(assembled['redirects'], hasLength(25));
+    final markdown = renderEvidenceMarkdown(assembled);
+    expect(markdown, contains('processChanged=true'));
+    expect(markdown, contains('| gpt-5.6-sol | medium | true | true | true |'));
+    expect(markdown, isNot(contains('nonce')));
   });
 
   test('rejects a missing or duplicate runner result', () {
