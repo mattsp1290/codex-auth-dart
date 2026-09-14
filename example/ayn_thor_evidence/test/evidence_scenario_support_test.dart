@@ -106,7 +106,11 @@ void main() {
       }),
     );
 
-    for (final phase in EvidenceCheckpointPhase.values) {
+    for (final phase in <EvidenceCheckpointPhase>[
+      EvidenceCheckpointPhase.refreshRisk,
+      EvidenceCheckpointPhase.beforeReplacement,
+      EvidenceCheckpointPhase.afterReplacement,
+    ]) {
       checkpoint = null;
       final inner = _MemoryStore();
       final store = PausingCredentialStore(

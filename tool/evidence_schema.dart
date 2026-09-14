@@ -281,11 +281,15 @@ final class EvidenceSchema {
     'rehydrate-after-resume': {
       'graphChanged': true,
       'recoveryResolved': true,
+      'noLoginRepeated': true,
+      'resolvedBeforeProtectedIo': true,
       'freshClient': true,
     },
     'rehydrate-after-process-death': {
-      'graphChanged': true,
+      'processChanged': true,
       'recoveryResolved': true,
+      'noLoginRepeated': true,
+      'resolvedBeforeProtectedIo': true,
       'freshClient': true,
     },
     'two-client-rotation': {
@@ -349,7 +353,18 @@ final class EvidenceSchema {
       'unavailableRejected': true,
       'zeroResponses': true,
     },
-    'exact-models': {'catalogCount': 1},
+    'exact-models': {
+      'catalogCount': 1,
+      'solAdmitted': true,
+      'solRequestAccepted': true,
+      'solExecutedIdentityVerified': true,
+      'terraAdmitted': true,
+      'terraRequestAccepted': true,
+      'terraExecutedIdentityVerified': true,
+      'lunaAdmitted': true,
+      'lunaRequestAccepted': true,
+      'lunaExecutedIdentityVerified': true,
+    },
     'redirect-matrix': {'redirectCaseCount': 25},
     'local-logout': {
       'clearAcknowledged': true,
@@ -574,12 +589,57 @@ final class EvidenceSchema {
           row['peerClosed'] != true) {
         _fail();
       }
-      if (_object(row['sourceShape']).isEmpty ||
-          _object(row['targetShape']).values.any((value) => value != false)) {
+      final sourceShape = _object(row['sourceShape']);
+      final targetShape = _object(row['targetShape']);
+      final expectedShape = _redirectSourceShapes[kind]!;
+      if (sourceShape.keys.toSet().length != expectedShape.length ||
+          expectedShape.entries.any(
+            (entry) => sourceShape[entry.key] != entry.value,
+          ) ||
+          targetShape.keys.toSet().length != expectedShape.length ||
+          targetShape.values.any((value) => value != false)) {
         _fail();
       }
     }
   }
+
+  static const _redirectSourceShapes = <String, Map<String, bool>>{
+    'device-json': {
+      'authorization': false,
+      'deviceAuthId': true,
+      'userCode': true,
+      'authorizationCode': false,
+      'refreshToken': false,
+    },
+    'authorization-code-form': {
+      'authorization': false,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': true,
+      'refreshToken': false,
+    },
+    'refresh-token-form': {
+      'authorization': false,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': false,
+      'refreshToken': true,
+    },
+    'catalog-bearer': {
+      'authorization': true,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': false,
+      'refreshToken': false,
+    },
+    'responses-bearer': {
+      'authorization': true,
+      'deviceAuthId': false,
+      'userCode': false,
+      'authorizationCode': false,
+      'refreshToken': false,
+    },
+  };
 
   static Map<String, Object?> _object(Object? value) {
     if (value is! Map) _fail();

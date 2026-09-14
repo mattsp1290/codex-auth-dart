@@ -7,6 +7,7 @@ import 'build_provenance.dart';
 import 'evidence_controller.dart';
 import 'evidence_controls.dart';
 import 'evidence_interruption_scenarios.dart';
+import 'evidence_rehydration_scenarios.dart';
 import 'evidence_recovery_scenarios.dart';
 import 'evidence_state_store.dart';
 import 'main.dart';
@@ -160,25 +161,38 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     EvidenceCommand command,
     AuthStatus status,
     Map<String, TupleEvidenceState> tuples,
-  ) => _stateStore.writeResult(
-    EvidenceResult(
-      command: command,
-      state:
-          status == AuthStatus.signedIn &&
-              tuples.length == 3 &&
-              tuples.values.every(
-                (value) => value == TupleEvidenceState.executedIdentityVerified,
-              )
-          ? EvidenceResultState.pass
-          : EvidenceResultState.fail,
-      recovery: status == AuthStatus.signedIn
-          ? EvidenceRecovery.signedIn
-          : EvidenceRecovery.reauthenticationRequired,
-      // One catalog request plus one Responses stream per required tuple.
-      protectedIo: status == AuthStatus.signedIn ? 4 : 0,
-      predicates: const <String, Object?>{'catalogCount': 1},
-    ),
-  );
+  ) {
+    bool verified(String slug) =>
+        tuples[slug] == TupleEvidenceState.executedIdentityVerified;
+    final sol = verified('gpt-5.6-sol');
+    final terra = verified('gpt-5.6-terra');
+    final luna = verified('gpt-5.6-luna');
+    return _stateStore.writeResult(
+      EvidenceResult(
+        command: command,
+        state: status == AuthStatus.signedIn && sol && terra && luna
+            ? EvidenceResultState.pass
+            : EvidenceResultState.fail,
+        recovery: status == AuthStatus.signedIn
+            ? EvidenceRecovery.signedIn
+            : EvidenceRecovery.reauthenticationRequired,
+        // One catalog request plus one Responses stream per required tuple.
+        protectedIo: status == AuthStatus.signedIn ? 4 : 0,
+        predicates: <String, Object?>{
+          'catalogCount': 1,
+          'solAdmitted': sol,
+          'solRequestAccepted': sol,
+          'solExecutedIdentityVerified': sol,
+          'terraAdmitted': terra,
+          'terraRequestAccepted': terra,
+          'terraExecutedIdentityVerified': terra,
+          'lunaAdmitted': luna,
+          'lunaRequestAccepted': luna,
+          'lunaExecutedIdentityVerified': luna,
+        },
+      ),
+    );
+  }
 
   Future<void> _completeCatalogEvidence(
     EvidenceCommand command,
@@ -202,28 +216,6 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         'allAdmitted': result.allRequiredAdmitted,
         'unavailableRejected': result.unavailableRejected,
         'zeroResponses': true,
-      },
-    ),
-  );
-
-  Future<void> _completeRehydration(
-    EvidenceCommand command,
-    AuthStatus status,
-    CatalogEvidenceResult result,
-  ) => _stateStore.writeResult(
-    EvidenceResult(
-      command: command,
-      state: status == AuthStatus.signedIn && result.allRequiredAdmitted
-          ? EvidenceResultState.pass
-          : EvidenceResultState.fail,
-      recovery: status == AuthStatus.signedIn
-          ? EvidenceRecovery.signedIn
-          : EvidenceRecovery.reauthenticationRequired,
-      protectedIo: status == AuthStatus.signedIn ? 1 : 0,
-      predicates: <String, Object?>{
-        'graphChanged': true,
-        'recoveryResolved': status == AuthStatus.signedIn,
-        'freshClient': result.allRequiredAdmitted,
       },
     ),
   );
@@ -267,6 +259,14 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
             _completeDeviceLoginOutcome(command, event, status),
       );
     }
+    if (command.scenario == EvidenceScenario.rehydrateAfterResume ||
+        command.scenario == EvidenceScenario.rehydrateAfterProcessDeath) {
+      return EvidenceRehydrationScenarioApp(
+        command: command,
+        stateStore: _stateStore,
+        checkpoint: _checkpoint,
+      );
+    }
     if (switch (command.scenario) {
       EvidenceScenario.interruptAfterRefreshRisk ||
       EvidenceScenario.interruptBeforeReplacementCommit ||
@@ -291,14 +291,6 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         autoRunCatalogEvidence: true,
         onCatalogEvidenceFinished: (status, result) =>
             _completeCatalogEvidence(command, status, result),
-      );
-    }
-    if (command.scenario == EvidenceScenario.rehydrateAfterResume ||
-        command.scenario == EvidenceScenario.rehydrateAfterProcessDeath) {
-      return EvidenceHostApp(
-        autoRunCatalogEvidence: true,
-        onCatalogEvidenceFinished: (status, result) =>
-            _completeRehydration(command, status, result),
       );
     }
     if (command.scenario == EvidenceScenario.redirectMatrix) {

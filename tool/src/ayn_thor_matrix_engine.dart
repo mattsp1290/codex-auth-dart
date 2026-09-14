@@ -17,6 +17,7 @@ enum MatrixStage {
   validateResult('validate-result'),
   redirectValidation('redirect-validation'),
   durableCheckpoint('durable-checkpoint'),
+  lifecycleResume('lifecycle-resume'),
   processRelaunch('process-relaunch');
 
   const MatrixStage(this.label);
@@ -68,7 +69,7 @@ final class MatrixRunRequest {
 
 abstract interface class MatrixRedirectFixture {
   Future<void> awaitReady();
-  Future<void> verify();
+  Future<List<Map<String, Object?>>> verify();
   Future<void> close();
 }
 
@@ -84,6 +85,7 @@ abstract interface class AynThorMatrixAdapter {
   Future<void> launch();
   Future<String> processIdentity(Duration timeout);
   Future<void> waitForCheckpoint(Duration timeout);
+  Future<void> backgroundAndResume();
   Future<String> waitForResult(Duration timeout);
   Future<bool> commandWasConsumed();
   Future<void> stop();
@@ -158,7 +160,21 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
     appMayRun = true;
     await adapter.launch();
     var processChanged = false;
-    if (_interruptionScenarios.contains(request.scenario)) {
+    if (request.scenario == 'rehydrate-after-resume') {
+      final originalProcess = await adapter.processIdentity(
+        const Duration(seconds: 15),
+      );
+      progress(MatrixStage.durableCheckpoint);
+      await adapter.waitForCheckpoint(request.resultTimeout);
+      progress(MatrixStage.lifecycleResume);
+      await adapter.backgroundAndResume();
+      final resumedProcess = await adapter.processIdentity(
+        const Duration(seconds: 15),
+      );
+      if (originalProcess != resumedProcess) {
+        throw StateError('resume evidence process changed');
+      }
+    } else if (_interruptionScenarios.contains(request.scenario)) {
       final originalProcess = await adapter.processIdentity(
         const Duration(seconds: 15),
       );
@@ -196,9 +212,10 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
       packageCommit: request.packageCommit,
       nonce: request.nonce,
     );
+    List<Map<String, Object?>>? redirects;
     if (fixture != null) {
       progress(MatrixStage.redirectValidation);
-      await fixture.verify();
+      redirects = await fixture.verify();
     }
     safeJson = jsonEncode(<String, Object?>{
       'device': 'ayn-thor',
@@ -208,6 +225,7 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
       'protectedIo': result['protectedIo'],
       'predicates': result['predicates'],
       if (result['category'] != null) 'category': result['category'],
+      'redirects': ?redirects,
     });
   } on Object catch (error) {
     primaryError = error;
@@ -260,6 +278,7 @@ Future<MatrixRunSuccess> runAynThorMatrixEngine({
 }
 
 const _interruptionScenarios = <String>{
+  'rehydrate-after-process-death',
   'interrupt-after-refresh-risk',
   'interrupt-before-replacement-commit',
   'interrupt-after-replacement-commit',

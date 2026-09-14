@@ -339,6 +339,19 @@ final class _Adb implements AynThorMatrixAdapter {
   }
 
   @override
+  Future<void> backgroundAndResume() async {
+    await _run(<String>['shell', 'input', 'keyevent', 'KEYCODE_HOME']);
+    await Future<void>.delayed(const Duration(seconds: 1));
+    await _run(<String>[
+      'shell',
+      'am',
+      'start',
+      '-n',
+      '$_package/com.mattsp1290.codexauth.ayn_thor_evidence.EvidenceActivity',
+    ]);
+  }
+
+  @override
   Future<String> processIdentity(Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
@@ -467,7 +480,7 @@ final class _RedirectFixture implements MatrixRedirectFixture {
   }
 
   @override
-  Future<void> verify() async {
+  Future<List<Map<String, Object?>>> verify() async {
     final client = HttpClient();
     try {
       final request = await client
@@ -490,17 +503,31 @@ final class _RedirectFixture implements MatrixRedirectFixture {
       }
       final cases = Map<String, Object?>.from(value['cases'] as Map);
       if (cases.length != 25) throw StateError('redirect cases incomplete');
-      _verifyStats(
+      final targetShape = _verifyStats(
         Map<String, Object?>.from(value['target'] as Map),
         const <String, bool>{},
       );
+      final rows = <Map<String, Object?>>[];
       for (final requestClass in _redirectShapes.entries) {
         for (final status in <int>[301, 302, 303, 307, 308]) {
           final stats = cases['${requestClass.key}-$status'];
           if (stats is! Map) throw StateError('redirect case missing');
-          _verifyStats(Map<String, Object?>.from(stats), requestClass.value);
+          final sourceShape = _verifyStats(
+            Map<String, Object?>.from(stats),
+            requestClass.value,
+          );
+          rows.add(<String, Object?>{
+            'requestClass': requestClass.key,
+            'status': status,
+            'sourceHits': 1,
+            'targetHits': 0,
+            'sourceShape': sourceShape,
+            'targetShape': targetShape,
+            'peerClosed': true,
+          });
         }
       }
+      return rows;
     } finally {
       client.close(force: true);
     }
@@ -555,7 +582,7 @@ final class _RedirectFixture implements MatrixRedirectFixture {
     },
   };
 
-  static void _verifyStats(
+  static Map<String, Object?> _verifyStats(
     Map<String, Object?> value,
     Map<String, bool> expected,
   ) {
@@ -569,6 +596,7 @@ final class _RedirectFixture implements MatrixRedirectFixture {
         )) {
       throw StateError('redirect credential shape invalid');
     }
+    return shape;
   }
 }
 

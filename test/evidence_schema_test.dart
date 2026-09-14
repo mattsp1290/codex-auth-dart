@@ -57,11 +57,28 @@ Map<String, Object?> _record() => <String, Object?>{
           'status': status,
           'sourceHits': 1,
           'targetHits': 0,
-          'sourceShape': <String, Object?>{'expected': true},
-          'targetShape': <String, Object?>{'expected': false},
+          'sourceShape': _sourceShape(requestClass),
+          'targetShape': _emptyShape(),
           'peerClosed': true,
         },
   ],
+};
+
+Map<String, bool> _sourceShape(String requestClass) => <String, bool>{
+  'authorization':
+      requestClass == 'catalog-bearer' || requestClass == 'responses-bearer',
+  'deviceAuthId': requestClass == 'device-json',
+  'userCode': requestClass == 'device-json',
+  'authorizationCode': requestClass == 'authorization-code-form',
+  'refreshToken': requestClass == 'refresh-token-form',
+};
+
+Map<String, bool> _emptyShape() => <String, bool>{
+  'authorization': false,
+  'deviceAuthId': false,
+  'userCode': false,
+  'authorizationCode': false,
+  'refreshToken': false,
 };
 
 String _rawResult({required String nonce}) =>

@@ -82,6 +82,7 @@ final class EvidenceCommand {
 }
 
 enum EvidenceCheckpointPhase {
+  rehydrationReady('rehydration-ready'),
   refreshRisk('refresh-risk'),
   beforeReplacement('before-replacement'),
   afterReplacement('after-replacement');

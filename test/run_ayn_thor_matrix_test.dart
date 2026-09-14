@@ -247,6 +247,41 @@ void main() {
     );
     expect(adapter.calls, contains('clear'));
   });
+
+  test('process-death rehydration is host-orchestrated', () async {
+    final adapter = FakeAdapterForCli(
+      commit: commit,
+      nonce: nonce,
+      processIdentities: <String>['first-process', 'second-process'],
+    );
+
+    final result = await runAynThorMatrixEngine(
+      request: request(scenario: 'rehydrate-after-process-death'),
+      adapter: adapter,
+      reportProgress: (_) {},
+    );
+
+    expect(adapter.calls, contains('checkpoint'));
+    expect(adapter.calls.where((call) => call == 'launch'), hasLength(2));
+    expect(result.safeJson, contains('"processChanged":true'));
+  });
+
+  test('resume rehydration preserves the process across lifecycle', () async {
+    final adapter = FakeAdapterForCli(
+      commit: commit,
+      nonce: nonce,
+      processIdentities: <String>['same-process', 'same-process'],
+    );
+
+    await runAynThorMatrixEngine(
+      request: request(scenario: 'rehydrate-after-resume'),
+      adapter: adapter,
+      reportProgress: (_) {},
+    );
+
+    expect(adapter.calls, containsAll(<String>['checkpoint', 'resume']));
+    expect(adapter.calls.where((call) => call == 'launch'), hasLength(1));
+  });
 }
 
 final class FakeAdapterForCli implements AynThorMatrixAdapter {
@@ -335,6 +370,9 @@ final class FakeAdapterForCli implements AynThorMatrixAdapter {
   Future<void> launch() async => calls.add('launch');
 
   @override
+  Future<void> backgroundAndResume() async => calls.add('resume');
+
+  @override
   Future<String> processIdentity(Duration timeout) async {
     calls.add('process');
     return processIdentities.removeAt(0);
@@ -379,6 +417,20 @@ final class FakeAdapterForCli implements AynThorMatrixAdapter {
 }
 
 Map<String, Object?> _passingPredicates(String scenario) => switch (scenario) {
+  'rehydrate-after-resume' => <String, Object?>{
+    'graphChanged': true,
+    'recoveryResolved': true,
+    'noLoginRepeated': true,
+    'resolvedBeforeProtectedIo': true,
+    'freshClient': true,
+  },
+  'rehydrate-after-process-death' => <String, Object?>{
+    'processChanged': false,
+    'recoveryResolved': true,
+    'noLoginRepeated': true,
+    'resolvedBeforeProtectedIo': true,
+    'freshClient': true,
+  },
   'interrupt-after-refresh-risk' => <String, Object?>{
     'refreshRiskAcknowledged': true,
     'processChanged': false,
@@ -404,7 +456,7 @@ final class _FakeFixture implements MatrixRedirectFixture {
   Future<void> awaitReady() async {}
 
   @override
-  Future<void> verify() async {}
+  Future<List<Map<String, Object?>>> verify() async => const [];
 
   @override
   Future<void> close() async {
