@@ -259,6 +259,7 @@ final class EvidenceSchema {
       'promptCleared': true,
       'approvalCompleted': true,
       'commitAcknowledged': true,
+      'freshClient': true,
     },
     'cancel-login': {
       'promptCleared': true,

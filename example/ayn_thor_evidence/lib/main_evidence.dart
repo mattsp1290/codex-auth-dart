@@ -109,10 +109,25 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
     EvidenceCommand command,
     EvidenceEvent event,
     AuthStatus status,
-  ) {
+  ) async {
+    var freshClient = false;
+    if (command.scenario == EvidenceScenario.approvedLogin &&
+        event.state == EvidenceState.passed &&
+        status == AuthStatus.signedIn) {
+      freshClient = (await EvidenceController(
+        CodexAuthClient(
+          CodexAuthOptions(
+            store: SecureCredentialStore(),
+            transport: DartIoHttpTransport(),
+          ),
+        ),
+      ).verifyCatalogAndUnavailable()).allRequiredAdmitted;
+    }
     final passed = switch (command.scenario) {
       EvidenceScenario.approvedLogin =>
-        event.state == EvidenceState.passed && status == AuthStatus.signedIn,
+        event.state == EvidenceState.passed &&
+            status == AuthStatus.signedIn &&
+            freshClient,
       EvidenceScenario.cancelLogin => event.state == EvidenceState.cancelled,
       EvidenceScenario.declinedLogin =>
         event.category == CodexAuthErrorCategory.deviceAuthorizationDeclined,
@@ -120,14 +135,17 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
         event.category == CodexAuthErrorCategory.deviceAuthorizationExpired,
       _ => false,
     };
-    return _stateStore.writeResult(
+    await _stateStore.writeResult(
       EvidenceResult(
         command: command,
         state: passed ? EvidenceResultState.pass : EvidenceResultState.fail,
         recovery: status == AuthStatus.signedIn
             ? EvidenceRecovery.signedIn
             : EvidenceRecovery.signedOut,
-        protectedIo: 0,
+        protectedIo:
+            command.scenario == EvidenceScenario.approvedLogin && freshClient
+            ? 1
+            : 0,
         category: event.state == EvidenceState.cancelled
             ? CodexAuthErrorCategory.cancelled.name
             : event.category?.name,
@@ -137,6 +155,8 @@ final class _EvidenceModeAppState extends State<_EvidenceModeApp> {
             'approvalCompleted': event.state == EvidenceState.passed,
           if (command.scenario == EvidenceScenario.approvedLogin)
             'commitAcknowledged': status == AuthStatus.signedIn,
+          if (command.scenario == EvidenceScenario.approvedLogin)
+            'freshClient': freshClient,
           if (command.scenario == EvidenceScenario.cancelLogin)
             'cancellationObserved': event.state == EvidenceState.cancelled,
           if (command.scenario == EvidenceScenario.cancelLogin)
