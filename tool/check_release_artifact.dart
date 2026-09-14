@@ -6,33 +6,42 @@ const _ordinaryForbidden = <String>[
   _evidenceFingerprint,
   'evidence-command.json',
   'evidence-result.json',
+  'evidence-checkpoint.json',
   'codex_auth/evidence_state_v1',
   'interrupt-after-refresh-risk',
+  'interrupt-before-replacement-commit',
+  'interrupt-after-replacement-commit',
   'invalid-grant',
 ];
 
 /// Verifies flavor separation against compiled APK contents, not imports.
 Future<void> main(List<String> arguments) async {
-  if (arguments.length != 2) {
+  if (arguments.length != 3 ||
+      !RegExp(r'^[0-9a-f]{40}$').hasMatch(arguments[0])) {
     throw ArgumentError(
-      'usage: check_release_artifact.dart <ordinary-release.apk> <evidence-debug.apk>',
+      'usage: check_release_artifact.dart <package-commit> '
+      '<ordinary-release.apk> <evidence-debug.apk>',
     );
   }
-  final ordinary = await _unpacked(arguments[0]);
-  final evidence = await _unpacked(arguments[1]);
+  final packageCommit = arguments[0];
+  final ordinary = await _unpacked(arguments[1]);
+  final evidence = await _unpacked(arguments[2]);
   await _verifyBadging(
-    arguments[0],
+    arguments[1],
     packageName: 'com.mattsp1290.codexauth.ayn_thor_evidence',
     launchActivity: 'com.mattsp1290.codexauth.ayn_thor_evidence.MainActivity',
   );
   await _verifyBadging(
-    arguments[1],
+    arguments[2],
     packageName: 'com.mattsp1290.codexauth.ayn_thor_evidence.evidence',
     launchActivity:
         'com.mattsp1290.codexauth.ayn_thor_evidence.EvidenceActivity',
   );
   if (!evidence.contains(_evidenceFingerprint)) {
     throw StateError('evidence APK lacks the expected entrypoint fingerprint');
+  }
+  if (!ordinary.contains(packageCommit) || !evidence.contains(packageCommit)) {
+    throw StateError('APK package commit does not match the candidate');
   }
   if (_ordinaryForbidden.any(ordinary.contains)) {
     throw StateError('ordinary APK contains evidence-only content');
