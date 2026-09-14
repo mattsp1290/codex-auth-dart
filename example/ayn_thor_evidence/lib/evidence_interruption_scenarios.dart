@@ -98,6 +98,9 @@ final class _EvidenceInterruptionScenarioAppState
     }
 
     final predicates = switch (checkpoint.phase) {
+      EvidenceCheckpointPhase.rehydrationReady => throw StateError(
+        'invalid refresh checkpoint phase',
+      ),
       EvidenceCheckpointPhase.refreshRisk => <String, Object?>{
         'refreshRiskAcknowledged': true,
         'processChanged': false,
