@@ -21,6 +21,7 @@ final class CodexAuthOptions {
     this.lifetimeCancellation,
     this.refreshMargin = const Duration(minutes: 2),
     this.catalogTtl = const Duration(minutes: 5),
+    this.delay,
   });
 
   final CredentialStore store;
@@ -29,6 +30,7 @@ final class CodexAuthOptions {
   final CancellationSignal? lifetimeCancellation;
   final Duration refreshMargin;
   final Duration catalogTtl;
+  final Future<void> Function(Duration, CancellationSignal?)? delay;
 }
 
 /// A host callback for the device authorization presentation.
@@ -55,6 +57,7 @@ final class CodexAuthClient {
       _lifetimeCancellation = options.lifetimeCancellation,
       _refreshMargin = options.refreshMargin,
       _catalogTtl = options.catalogTtl,
+      _delayOverride = options.delay,
       _sessionId = _newSessionId();
 
   final CredentialStore _store;
@@ -63,6 +66,7 @@ final class CodexAuthClient {
   final CancellationSignal? _lifetimeCancellation;
   final Duration _refreshMargin;
   final Duration _catalogTtl;
+  final Future<void> Function(Duration, CancellationSignal?)? _delayOverride;
   final String _sessionId;
 
   CancellationSignal? _signal(CancellationSignal? operation) =>
@@ -142,16 +146,26 @@ final class CodexAuthClient {
     }
     final uri = protocolUri(authOrigin, deviceVerificationPath);
     final expiry = _clock().toUtc().add(deviceAuthorizationCap);
-    await onPrompt(
-      DeviceLoginPrompt(
-        verificationUri: uri,
-        userCode: userCode,
-        expiresAt: expiry,
-      ),
-    );
+    try {
+      await onPrompt(
+        DeviceLoginPrompt(
+          verificationUri: uri,
+          userCode: userCode,
+          expiresAt: expiry,
+        ),
+      );
+    } on OperationCancelled {
+      rethrow;
+    } on Object {
+      throw const CodexAuthException(
+        CodexAuthErrorCategory.protocolFailure,
+        operation: 'deviceLogin',
+      );
+    }
     while (_clock().toUtc().isBefore(expiry)) {
       throwIfCancelled(signal);
       await _delay(Duration(seconds: intervalSeconds.clamp(1, 30)), signal);
+      if (!_clock().toUtc().isBefore(expiry)) break;
       final poll = await _transport.send(
         HttpRequestData(
           method: 'POST',
@@ -171,10 +185,26 @@ final class CodexAuthClient {
       );
       await _rejectRedirect(poll, 'deviceLogin');
       if (poll.statusCode == 403 || poll.statusCode == 404) {
-        await poll.body.drain<void>();
+        try {
+          await poll.body.drain<void>();
+        } finally {
+          await poll.close?.call();
+        }
         continue;
       }
       final payload = await _boundedJson(poll, 'deviceLogin');
+      if (payload['error'] == 'authorization_declined') {
+        throw const CodexAuthException(
+          CodexAuthErrorCategory.deviceAuthorizationDeclined,
+          operation: 'deviceLogin',
+        );
+      }
+      if (payload['error'] == 'expired_token') {
+        throw const CodexAuthException(
+          CodexAuthErrorCategory.deviceAuthorizationExpired,
+          operation: 'deviceLogin',
+        );
+      }
       final authorizationCode = payload['authorization_code'];
       final codeVerifier = payload['code_verifier'];
       final codeChallenge = payload['code_challenge'];
@@ -548,10 +578,21 @@ final class CodexAuthClient {
         operation: 'loginDevice',
       );
     }
-    await _store.transaction(
-      (transaction) => transaction.replace(encodeCredentials(credentials)),
-      cancellation: signal,
-    );
+    try {
+      await _store.transaction(
+        (transaction) => transaction.replace(encodeCredentials(credentials)),
+        cancellation: signal,
+      );
+    } on OperationCancelled {
+      rethrow;
+    } on Object {
+      throw const CodexAuthException(
+        CodexAuthErrorCategory.localCleanupRequired,
+        operation: 'loginDevice',
+        requiresReauthentication: true,
+        cleanupRequired: true,
+      );
+    }
   }
 
   Future<Credentials?> _readValid(
@@ -710,6 +751,8 @@ final class CodexAuthClient {
       );
 
   Future<void> _delay(Duration duration, CancellationSignal? signal) async {
+    final override = _delayOverride;
+    if (override != null) return override(duration, signal);
     final timer = Future<void>.delayed(duration);
     if (signal == null) return timer;
     await Future.any(<Future<void>>[timer, signal.whenCancelled]);
