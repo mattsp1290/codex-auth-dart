@@ -245,7 +245,7 @@ final class EvidenceSchema {
     String scenario,
     Map<String, Object?> predicates,
   ) {
-    final expected = _rawPassValues[scenario];
+    final expected = rawPassValues[scenario];
     if (expected == null || predicates.keys.toSet().length != expected.length) {
       return false;
     }
@@ -254,7 +254,7 @@ final class EvidenceSchema {
     );
   }
 
-  static const _rawPassValues = <String, Map<String, Object>>{
+  static const rawPassValues = <String, Map<String, Object>>{
     'approved-login': {
       'promptCleared': true,
       'approvalCompleted': true,
