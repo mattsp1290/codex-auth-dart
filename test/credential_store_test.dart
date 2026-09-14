@@ -3,6 +3,19 @@ import 'dart:async';
 import 'package:codex_auth/codex_auth.dart';
 import 'package:test/test.dart';
 
+final class _UnusedTransport implements HttpTransport {
+  var requests = 0;
+
+  @override
+  Future<HttpResponseData> send(
+    HttpRequestData request, {
+    CancellationSignal? cancellation,
+  }) {
+    requests++;
+    throw StateError('unexpected transport');
+  }
+}
+
 final class MemoryStore implements CredentialStore {
   String? value;
   Future<void> _tail = Future<void>.value();
@@ -47,6 +60,19 @@ final class _MemoryTransaction implements CredentialTransaction {
 }
 
 void main() {
+  test('local logout clears without transport I/O', () async {
+    final store = MemoryStore()..value = 'opaque-local-state';
+    final transport = _UnusedTransport();
+    final client = CodexAuthClient(
+      CodexAuthOptions(store: store, transport: transport),
+    );
+
+    await client.logoutLocal();
+
+    expect(store.value, isNull);
+    expect(transport.requests, 0);
+  });
+
   test('transactions from independent users do not overlap', () async {
     final store = MemoryStore();
     final firstEntered = Completer<void>();
